@@ -26,7 +26,7 @@ export async function drainPush(env,now=Date.now()){
    if(job.expires_at<=Date.now())result.status='expired';
    else if(job.kind!=='test'&&quietNow(pref?.quiet_start,pref?.quiet_end,Date.now()))result.status='muted';
    else if(!binding)result.status='unbound';
-   else {const spt=await decryptSpt(env,job.member_id,binding.spt_cipher);const url=job.invite_id?'https://qidongapp.rainy256.workers.dev/game/'+job.invite_id:'https://qidongapp.rainy256.workers.dev/open/'+(['reservation','reminder'].includes(job.kind)?'schedule':'me');result=await new WxPusherProvider().send(spt,job.content,url);}
+   else {const spt=await decryptSpt(env,job.member_id,binding.spt_cipher);const url=job.invite_id?'https://qidongapp.apexdaishi.xyz/game/'+job.invite_id:'https://qidongapp.apexdaishi.xyz/open/'+(['reservation','reminder'].includes(job.kind)?'schedule':'me');result=await new WxPusherProvider().send(spt,job.content,url);}
   }catch{result.status='unknown';}
   if(result.status==='retry'&&job.attempts<3&&Date.now()+60000<job.expires_at){
    await env.DB.prepare("UPDATE app_push_jobs SET status='queued',due_at=?,provider_http=?,provider_code=? WHERE id=? AND status='sending'").bind(Date.now()+60000*job.attempts,result.http,result.code,job.id).run();

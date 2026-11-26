@@ -6,7 +6,7 @@
 开发原则：所有写入基于服务端认证的 member id；客户端不得传入或选择自己的身份；激活码仅存哈希；凭证仅通过 Android Keystore 加密存储；业务状态由服务器确认。
 
 ## 当前部署
-正式基础 Worker 已独立部署： https://qidongapp.rainy256.workers.dev 。D1 已创建 app_members、app_invites、app_messages 及通知记录触发器，固定 m1–m3 三个占位身份，均未激活。激活码由管理员在安全环境生成 32 字节随机值并仅把 SHA-256 哈希写入对应未激活成员；禁止将明文提交到 Git。丢失激活响应或重装需要管理员安全重置该成员凭证，目前未提供自助恢复。
+正式基础 Worker 已独立部署： https://qidongapp.apexdaishi.xyz 。D1 已创建 app_members、app_invites、app_messages 及通知记录触发器，固定 m1–m3 三个占位身份，均未激活。激活码由管理员在安全环境生成 32 字节随机值并仅把 SHA-256 哈希写入对应未激活成员；禁止将明文提交到 Git。丢失激活响应或重装需要管理员安全重置该成员凭证，目前未提供自助恢复。
 Android Keystore AES-GCM 原生插件已编写，产品构建配置单独生成 APK；不得用产品 APK 覆盖仍在验收的探针 APK，debug 签名可能冲突。浏览器只在当前内存保存凭证，不做持久化。上述功能在后续提交已接入；以下新增章节为当前配置说明。业务端到端和真机测试未验证。
 
 ## 通知及预约开发
@@ -35,4 +35,6 @@ Android Keystore AES-GCM 原生插件已编写，产品构建配置单独生成 
 新界面先选固定成员，再粘贴本人专属一次性口令；服务器同时核验成员与口令匹配，兼容旧 APK 无 memberId 的请求。管理员本地签发工具生成 128 位随机口令（32 个十六进制字符），无需改数据库结构。现有 64 字符口令仍兼容；数据库只保存 SHA-256。签发及 SPT 加密密钥配置必须由有权限的管理员在安全环境完成，此提交不写入任何真实口令或密钥，不重置已激活成员。
 
 ## 鸿蒙 PWA
-独立地址 `https://qidongapp.rainy256.workers.dev/app/`，由同一正式 Worker 提供入口与 API。GitHub Actions `Publish PWA static build` 构建至 `dist-pwa` 并发布独立 `pwa-static` 分支；Worker 仅向固定公开分支读取白名单静态文件，不转发认证头或 Cookie，不依赖浏览器直连 GitHub。APK 构建保持原路径。网页激活用 HttpOnly/Secure/SameSite=Strict Cookie（API 路径），写操作必须同源 JSON；旧 APK 仍用原 Bearer。通知入口可选择网页或 APK。PWA 清除浏览器数据可能需要管理员重新授权；同一成员仍为单设备授权，尚无多设备绑定。Service Worker 只缓存离线提示，不缓存私人数据，联网方可约局。鸿蒙浏览器是否支持独立窗口/桌面安装需真机确认。签发口令与 SPT 加密密钥仍需安全初始化，不由网页公开配置。
+独立地址 `https://qidongapp.apexdaishi.xyz/app/`，由同一正式 Worker 提供入口与 API。GitHub Actions `Publish PWA static build` 构建至 `dist-pwa` 并发布独立 `pwa-static` 分支；Worker 仅向固定公开分支读取白名单静态文件，不转发认证头或 Cookie，不依赖浏览器直连 GitHub。APK 构建保持原路径。网页激活用 HttpOnly/Secure/SameSite=Strict Cookie（API 路径），写操作必须同源 JSON；旧 APK 仍用原 Bearer。通知入口可选择网页或 APK。PWA 清除浏览器数据可能需要管理员重新授权；同一成员仍为单设备授权，尚无多设备绑定。Service Worker 只缓存离线提示，不缓存私人数据，联网方可约局。鸿蒙浏览器是否支持独立窗口/桌面安装需真机确认。签发口令与 SPT 加密密钥仍需安全初始化，不由网页公开配置。
+
+正式自定义域名 qidongapp.apexdaishi.xyz 已绑定独立 qidongapp Worker；旧 workers.dev 入口保留供已安装 APK 使用。新 APK 默认 API 与新的通知链接使用自定义域名，网页使用同源 API。原 qidong Worker 和其两个域名不变。
