@@ -8,6 +8,7 @@ import {
   GAME_LABELS,
   formatSlotStamp,
   type Reservation,
+  type ReservationDraft,
   type WeekSpan,
   type WriteFn,
 } from './types';
@@ -305,6 +306,8 @@ export function PushSettings({ token, apiBase }: { token: string; apiBase: strin
 }
 
 type ReservationProps = {
+  draft: ReservationDraft | null;
+  onDraftConsumed: () => void;
   now: number;
   me: string;
   members: { id: string; nickname: string }[];
@@ -318,6 +321,8 @@ type ReservationProps = {
 };
 
 export function ReservationPanel({
+  draft,
+  onDraftConsumed,
   now,
   me,
   members,
@@ -335,6 +340,17 @@ export function ReservationPanel({
   const [selectedGame, setGame] = useState<GameTag>(game);
   const [title, setTitle] = useState(custom);
   const [cancelTarget, setCancelTarget] = useState<Reservation | null>(null);
+  const [conflictNotice, setConflictNotice] = useState(false);
+  useEffect(() => {
+    if (!draft) return;
+    setEdit(null);
+    setGame(draft.game);
+    setTitle(draft.title);
+    setFrom(draft.from);
+    setDuration(2);
+    setConflictNotice(false);
+    onDraftConsumed();
+  }, [draft, onDraftConsumed]);
 
   const start = Math.floor(now / 1800000) + 1;
   const firstDayStart = Math.floor((now + 7200000) / 86400000) * 48 - 4;
@@ -361,7 +377,8 @@ export function ReservationPanel({
 
   const customMissing = !edit && selectedGame === 'custom' && !title.trim();
   const exceedsRange = effectiveFrom + duration > end;
-  const valid = effectiveFrom >= start && !exceedsRange && !customMissing;
+  const conflict = reservations.find(r => r.id !== edit?.id && r.state !== 'cancelled' && r.from_slot < effectiveFrom + duration && r.to_slot > effectiveFrom);
+  const valid = effectiveFrom >= start && !exceedsRange && !customMissing && !conflict;
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -379,7 +396,8 @@ export function ReservationPanel({
           true,
           'res-create',
         );
-    if (ok) setEdit(null);
+    if (ok) { setEdit(null); setConflictNotice(false); }
+    else setConflictNotice(true);
   }
 
   return (
@@ -412,7 +430,7 @@ export function ReservationPanel({
         </div>
       )}
 
-      <form className="subCard stackForm" onSubmit={(e) => void submit(e)}>
+      <form id="reservation-form" className="subCard stackForm" onSubmit={(e) => void submit(e)}>
         <div className="cardHeaderRow">
           <h3 className="subHeading">{edit ? `变更预约 · ${edit.title}` : '发起新预约'}</h3>
           {edit && (
@@ -508,6 +526,8 @@ export function ReservationPanel({
           </label>
         </div>
 
+        {conflict && <div className="stackForm"><p role="alert" className="fieldError">这个时间已有预约</p><button type="button" className="btnGhostSm" onClick={() => { const el=document.getElementById('reservation-'+conflict.id); el?.focus({preventScroll:true}); el?.scrollIntoView({behavior:'smooth',block:'start'}); }}>查看该预约</button></div>}
+        {conflictNotice && !conflict && <p role="status" className="helperText">提交未成功，请检查顶部提示，或改选其他时段后重试。</p>}
         {exceedsRange && <p className="fieldError">结束时间超出了未来 7 天范围，请缩短时长或提前开始时间。</p>}
 
         <button type="submit" className="btnPrimary btnFull" disabled={busy || !valid}>
