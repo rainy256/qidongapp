@@ -1,4 +1,5 @@
 import {MEMBER_IDS,REPLIES,GAMES,normalizeSchedule,replyColumn,mutationValid,secretValid,digest,newToken,inviteView} from './logic.mjs';
+import {encryptSpt,validSpt} from './spt.mjs';
 const HEADERS={'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','Access-Control-Allow-Origin':'https://localhost','Access-Control-Allow-Headers':'Authorization, Content-Type','Access-Control-Allow-Methods':'GET, POST, OPTIONS','Vary':'Origin'};
 const json=(value,status=200)=>new Response(JSON.stringify(value),{status,headers:HEADERS});
 const publicInvite='id,creator,game,title,created_at,expires_at,revision,r1,r2,r3';
@@ -20,6 +21,10 @@ export default {async fetch(req,env){
    return member?json({member,token}):json({error:'invalid_activation'},401);
   }
   const me=await authenticate(req,env);if(!me)return json({error:'unauthorized'},401);
+  if(path==='/api/push'&&req.method==='GET'){
+   const r=await env.DB.prepare('SELECT bound_at FROM app_push_bindings WHERE member_id=?').bind(me.id).first();
+   return json({bound:!!r,boundAt:r?.bound_at??null});
+  }
   if(path==='/api/state'&&req.method==='GET'){
    const r=await env.DB.batch([
     env.DB.prepare('UPDATE app_members SET last_seen=? WHERE id=? AND (last_seen IS NULL OR last_seen<?)').bind(now,me.id,now-30000),
@@ -31,6 +36,15 @@ export default {async fetch(req,env){
   }
   if(req.method!=='POST')return json({error:'not_found'},404);
   const b=await body(req);if(!b||typeof b!=='object')return json({error:'invalid_body'},400);
+  if(path==='/api/push/bind'){
+   if(!validSpt(b.spt))return json({error:'invalid_spt'},400);
+   const cipher=await encryptSpt(env,me.id,b.spt);
+   await env.DB.prepare('INSERT INTO app_push_bindings(member_id,spt_cipher,bound_at) VALUES(?,?,?) ON CONFLICT(member_id) DO UPDATE SET spt_cipher=excluded.spt_cipher,bound_at=excluded.bound_at').bind(me.id,cipher,now).run();
+   return json({bound:true,boundAt:now});
+  }
+  if(path==='/api/push/unbind'){
+   await env.DB.prepare('DELETE FROM app_push_bindings WHERE member_id=?').bind(me.id).run();return json({bound:false});
+  }
   if(path==='/api/invites'){
    if(!mutationValid(b.mutation)||!Object.hasOwn(GAMES,b.game))return json({error:'invalid_invite'},400);
    const title=b.game==='custom'&&typeof b.title==='string'?b.title.trim():GAMES[b.game];

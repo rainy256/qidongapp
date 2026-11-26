@@ -1,0 +1,6 @@
+const hex=bytes=>Array.from(new Uint8Array(bytes),x=>x.toString(16).padStart(2,'0')).join('');
+const unhex=s=>{if(typeof s!=='string'||s.length%2||!/^[0-9a-f]+$/i.test(s))throw Error('invalid_cipher');return Uint8Array.from(s.match(/../g),x=>parseInt(x,16));};
+const key=async env=>{if(!/^[0-9a-f]{64}$/i.test(env.SPT_ENCRYPTION_KEY||''))throw Error('missing_spt_key');return crypto.subtle.importKey('raw',unhex(env.SPT_ENCRYPTION_KEY),'AES-GCM',false,['encrypt','decrypt']);};
+export const validSpt=s=>typeof s==='string'&&/^SPT_[A-Za-z0-9_-]{16,128}$/.test(s);
+export async function encryptSpt(env,member,spt){if(!validSpt(spt))throw Error('invalid_spt');const iv=crypto.getRandomValues(new Uint8Array(12));const data=await crypto.subtle.encrypt({name:'AES-GCM',iv,additionalData:new TextEncoder().encode('qidongapp:spt:v1:'+member)},await key(env),new TextEncoder().encode(spt));return hex(iv)+':'+hex(data);}
+export async function decryptSpt(env,member,cipher){const [iv,data]=cipher.split(':');const plain=await crypto.subtle.decrypt({name:'AES-GCM',iv:unhex(iv),additionalData:new TextEncoder().encode('qidongapp:spt:v1:'+member)},await key(env),unhex(data));return new TextDecoder().decode(plain);}
