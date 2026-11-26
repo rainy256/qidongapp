@@ -6,9 +6,10 @@ import {encryptSpt,validSpt} from './spt.mjs';
 import {effectiveSchedule,scheduleStatus,normalizeTemplate,updateOverrides,ownSchedule,writeWeekly} from './weekly.mjs';
 import {drainPush} from './push.mjs';
 import {reservationApi} from './reservations.mjs';
+import {availabilityApi} from './availability.mjs';
 const HEADERS={'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','Access-Control-Allow-Origin':'https://localhost','Access-Control-Allow-Headers':'Authorization, Content-Type','Access-Control-Allow-Methods':'GET, POST, OPTIONS','Vary':'Origin'};
 const json=(value,status=200)=>new Response(JSON.stringify(value),{status,headers:HEADERS});
-const publicInvite='id,creator,game,title,created_at,expires_at,revision,r1,r2,r3';
+const publicInvite='id,creator,game,title,created_at,expires_at,revision,r1,r2,r3,r1_eta,r2_eta,r3_eta';
 async function body(req){try{const s=await req.text();if(s.length>20000)return null;return JSON.parse(s);}catch{return null;}}
 export default {async fetch(req,env,ctx){
  const u=new URL(req.url),path=u.pathname,now=Date.now();
@@ -40,14 +41,15 @@ export default {async fetch(req,env,ctx){
   if(path==='/api/state'&&req.method==='GET'){
    const r=await env.DB.batch([
     env.DB.prepare('UPDATE app_members SET last_seen=? WHERE id=? AND (last_seen IS NULL OR last_seen<?)').bind(now,me.id,now-30000),
-    env.DB.prepare('SELECT m.id,m.nickname,m.schedule_json,m.schedule_revision,m.last_seen,w.template_json,w.override_days_json FROM app_members m LEFT JOIN app_weekly w ON w.member_id=m.id ORDER BY m.id'),
+    env.DB.prepare('SELECT m.id,m.nickname,m.schedule_json,m.schedule_revision,m.last_seen,m.available_until,m.availability_revision,w.template_json,w.override_days_json FROM app_members m LEFT JOIN app_weekly w ON w.member_id=m.id ORDER BY m.id'),
     env.DB.prepare('SELECT '+publicInvite+' FROM app_invites WHERE expires_at>? ORDER BY created_at DESC LIMIT 20').bind(now-86400000),
     env.DB.prepare('SELECT id,invite_id,kind,actor,detail,created_at,read_at FROM app_messages WHERE member_id=? ORDER BY created_at DESC LIMIT 100').bind(me.id)
    ]);
-   const extra=await env.DB.batch([env.DB.prepare('SELECT id,creator,game,title,from_slot,to_slot,state,r1,r2,r3,revision FROM app_reservations WHERE to_slot*1800000>? ORDER BY from_slot LIMIT 50').bind(now-86400000),env.DB.prepare('SELECT id,reservation_id,kind,detail,created_at,read_at FROM app_reservation_events WHERE member_id=? ORDER BY created_at DESC LIMIT 100').bind(me.id),env.DB.prepare("SELECT id,invite_id,kind,content AS detail,created_at,status FROM app_push_jobs WHERE member_id=? AND kind='nudge' ORDER BY created_at DESC LIMIT 50").bind(me.id)]);return json({reservations:extra[0].results,reservationMessages:extra[1].results,nudges:extra[2].results,me,members:r[1].results.map(x=>({id:x.id,nickname:x.nickname,schedule_revision:x.schedule_revision,last_seen:x.last_seen,schedule:effectiveSchedule(x,now),scheduleStatus:scheduleStatus(x,now),...(x.id===me.id?{template:JSON.parse(x.template_json||'[]'),overrideDays:JSON.parse(x.override_days_json||'[]')}:{} )})),invites:r[2].results.map(x=>inviteView(x,now)),messages:r[3].results,now});
+   const extra=await env.DB.batch([env.DB.prepare('SELECT id,creator,game,title,from_slot,to_slot,state,r1,r2,r3,revision FROM app_reservations WHERE to_slot*1800000>? ORDER BY from_slot LIMIT 50').bind(now-86400000),env.DB.prepare('SELECT id,reservation_id,kind,detail,created_at,read_at FROM app_reservation_events WHERE member_id=? ORDER BY created_at DESC LIMIT 100').bind(me.id),env.DB.prepare("SELECT id,invite_id,kind,content AS detail,created_at,status FROM app_push_jobs WHERE member_id=? AND kind='nudge' ORDER BY created_at DESC LIMIT 50").bind(me.id)]);return json({features:{rebook:env.ENABLE_REBOOKING==='true'},reservations:extra[0].results,reservationMessages:extra[1].results,nudges:extra[2].results,me,members:r[1].results.map(x=>({id:x.id,nickname:x.nickname,schedule_revision:x.schedule_revision,last_seen:x.last_seen,available_until:x.available_until>now?x.available_until:null,availability_revision:x.availability_revision,schedule:effectiveSchedule(x,now),scheduleStatus:scheduleStatus(x,now),...(x.id===me.id?{template:JSON.parse(x.template_json||'[]'),overrideDays:JSON.parse(x.override_days_json||'[]')}:{} )})),invites:r[2].results.map(x=>inviteView(x,now)),messages:r[3].results,now});
   }
   if(req.method!=='POST')return json({error:'not_found'},404);
   const b=await body(req);if(!b||typeof b!=='object')return json({error:'invalid_body'},400);
+  if(path==='/api/availability'){const result=await availabilityApi(env,me,b,now);return json(result.value,result.status);}
   if(path==='/api/push/bind'){
    if(!validSpt(b.spt))return json({error:'invalid_spt'},400);
    if(!env.SPT_ENCRYPTION_KEY)return json({error:'push_key_not_configured'},503);
@@ -97,8 +99,8 @@ export default {async fetch(req,env,ctx){
   const match=path.match(/^\/api\/invites\/([a-z0-9-]{36})\/reply$/);
   if(match){
    if(!REPLIES.includes(b.reply)||!mutationValid(b.mutation)||!Number.isSafeInteger(b.revision))return json({error:'invalid_reply'},400);
-   const col=replyColumn(me.id),mut=me.id+'_mut';
-   const row=await env.DB.prepare('UPDATE app_invites SET '+col+'=?,'+mut+'=?,revision=revision+1 WHERE id=? AND revision=? AND expires_at>? AND COALESCE('+mut+",'')<>? AND NOT(r1='ready' AND r2='ready' AND r3='ready') RETURNING "+publicInvite).bind(b.reply,b.mutation,match[1],b.revision,now,b.mutation).first();
+   const col=replyColumn(me.id),mut=me.id+'_mut',eta=['5','10','30'].includes(b.reply)?now+Number(b.reply)*60000:null;
+   const row=await env.DB.prepare('UPDATE app_invites SET '+col+'=?,'+col+'_eta=?,'+mut+'=?,revision=revision+1 WHERE id=? AND revision=? AND expires_at>? AND COALESCE('+mut+",'')<>? AND NOT(r1='ready' AND r2='ready' AND r3='ready') RETURNING "+publicInvite).bind(b.reply,eta,b.mutation,match[1],b.revision,now,b.mutation).first();
    if(row){kick();return json({invite:inviteView(row,now)});}
    const retry=await env.DB.prepare('SELECT '+publicInvite+' FROM app_invites WHERE id=? AND '+mut+'=?').bind(match[1],b.mutation).first();
    return retry?json({invite:inviteView(retry,now)}):json({error:'revision_conflict_or_expired'},409);
