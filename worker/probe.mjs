@@ -23,8 +23,8 @@ export default {async fetch(req,env){
   const r=await env.DB.prepare('INSERT INTO probe_rate(member_id,last_at) VALUES (?,?) ON CONFLICT(member_id) DO UPDATE SET last_at=excluded.last_at WHERE probe_rate.last_at<=?').bind(member.id,now,now-60000).run();
   if(r.meta.changes!==1)return json({error:'rate_limited'},429);
   const target=body.mode==='scheme'?'qidongapp://game/probe':url.origin+'/probe';
-  let status='unknown';
-  try{status=await new WxPusherProvider().send({spt:member.spt,url:target});}catch{}
-  return json({status},status==='accepted'?200:502);
+  const outcome=await new WxPusherProvider().sendDetailed({spt:member.spt,url:target});
+  await env.DB.prepare('INSERT INTO probe_attempts(id,member_id,created_at,mode,status,provider_http,provider_code,reason,recipient_code) VALUES (?,?,?,?,?,?,?,?,?)').bind(crypto.randomUUID(),member.id,now,body.mode,outcome.status,outcome.http,outcome.code,outcome.reason,outcome.recipientCode??null).run();
+  return json({status:outcome.status},outcome.status==='accepted'?200:502);
  }catch{return json({error:'request_failed'},500);}
 }};

@@ -9,3 +9,5 @@ test('accepted never means delivered',async()=>{
 test('business rejection is not accepted',async()=>assert.equal(await new WxPusherProvider(async()=>Response.json({code:1001,success:false})).send(payload),'rejected'));
 test('recipient rejection is not accepted',async()=>assert.equal(await new WxPusherProvider(async()=>Response.json({code:1000,data:[{code:1001}]})).send(payload),'rejected'));
 test('HTTP failure leaves result unknown',async()=>assert.equal(await new WxPusherProvider(async()=>new Response('',{status:503})).send(payload),'unknown'));
+
+test('diagnostic result never exposes raw provider text',async()=>{const p=new WxPusherProvider(async()=>Response.json({code:1001,msg:'SPT_TEST_ONLY'}));assert.deepEqual(await p.sendDetailed(payload),{status:'rejected',http:200,code:1001,reason:'provider_rejected'});});
