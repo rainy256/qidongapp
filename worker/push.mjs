@@ -1,9 +1,9 @@
 export class WxPusherProvider {
  constructor(fetcher=(...args)=>globalThis.fetch(...args)){this.fetcher=fetcher;}
  async send(input){return (await this.sendDetailed(input)).status;}
- async sendDetailed({spt,url}){
+ async sendDetailed({spt,url,delayed=false}){
   try {
-   const payload={spt,contentType:1,summary:'启动！设备测试',content:'启动！设备测试：请检查锁屏通知。'};
+   const payload={spt,contentType:1,summary:delayed?'启动！延时测试':'启动！设备测试',content:delayed?'启动！云端延时通知：请确认锁屏及关闭启动 App 后仍能接收。':'启动！设备测试：请检查锁屏通知。'};
    if(url)payload.url=url;
    const res=await this.fetcher('https://wxpusher.zjiecode.com/api/send/message/simple-push',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload),signal:AbortSignal.timeout(10000)});
    const http=res.status;

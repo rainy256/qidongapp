@@ -1,9 +1,11 @@
 import {WxPusherProvider} from './push.mjs';
+import {delayPage,runDelayed} from './delay.mjs';
 const headers={'Access-Control-Allow-Origin':'https://localhost','Access-Control-Allow-Headers':'Authorization, Content-Type','Access-Control-Allow-Methods':'POST, OPTIONS','Cache-Control':'no-store','Content-Type':'application/json; charset=utf-8'};
 const json=(value,status=200)=>new Response(JSON.stringify(value),{status,headers});
 async function hash(value){return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(value))),b=>b.toString(16).padStart(2,'0')).join('');}
 export default {async fetch(req,env){
  const url=new URL(req.url);
+ if(url.pathname==='/delay')return delayPage(req,env);
  if(url.pathname==='/probe'&&req.method==='GET')return new Response('<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>启动！设备验证</title><h1>启动！设备验证</h1><p>这里没有任何成员数据。</p><a href="qidongapp://game/probe">打开测试 App</a></html>',{headers:{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','Content-Security-Policy':"default-src 'none'; frame-ancestors 'none'"}});
  if(url.pathname!=='/api/probe')return json({error:'not_found'},404);
  if(req.method==='OPTIONS')return new Response(null,{status:204,headers});
@@ -27,4 +29,4 @@ export default {async fetch(req,env){
   await env.DB.prepare('INSERT INTO probe_attempts(id,member_id,created_at,mode,status,provider_http,provider_code,reason,recipient_code) VALUES (?,?,?,?,?,?,?,?,?)').bind(crypto.randomUUID(),member.id,now,body.mode,outcome.status,outcome.http,outcome.code,outcome.reason,outcome.recipientCode??null).run();
   return json({status:outcome.status},outcome.status==='accepted'?200:502);
  }catch{return json({error:'request_failed'},500);}
-}};
+},async scheduled(event,env,ctx){ctx.waitUntil(runDelayed(env));}};

@@ -1,0 +1,3 @@
+CREATE TABLE IF NOT EXISTS probe_delayed (id TEXT PRIMARY KEY,member_id TEXT NOT NULL CHECK(member_id IN ('m1','m2','m3')),created_at INTEGER NOT NULL,due_at INTEGER NOT NULL,expires_at INTEGER NOT NULL,status TEXT NOT NULL CHECK(status IN ('queued','sending','accepted','rejected','unknown','expired')),claimed_at INTEGER,finished_at INTEGER,provider_http INTEGER,provider_code INTEGER,reason TEXT);
+CREATE UNIQUE INDEX IF NOT EXISTS probe_delayed_one_pending ON probe_delayed(member_id) WHERE status IN ('queued','sending');
+CREATE INDEX IF NOT EXISTS probe_delayed_due ON probe_delayed(status,due_at);

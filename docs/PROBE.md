@@ -3,7 +3,7 @@
 这不是正式业务服务。测试凭证独立于未来一次性激活码，仅用于测试；测试 SPT 暂存在 Cloudflare Secret，不进入数据库、不通过 API 返回。正式产品必须替换为加密 D1 持久化绑定、身份授权和持久化发送队列。测试限流为每人每分钟一次。
 
 ## 已创建的云端资源（2026-11-26）
-独立 D1 `qidongapp-db` 已创建（APAC），已实际执行 `0001_probe.sql` 并确认 `probe_rate` 表存在。Worker `qidongapp-probe` 已上传且 workers.dev 子域启用。默认地址：https://qidongapp-probe.rainy256.workers.dev 。尚未设置 PROBE_MEMBERS，未验证公网访问和真实通知。
+独立 D1 `qidongapp-db` 已创建（APAC），已实际执行 `0001_probe.sql` 并确认 `probe_rate` 表存在。Worker `qidongapp-probe` 已上传且 workers.dev 子域启用。默认地址：https://qidongapp-probe.rainy256.workers.dev 。已配置首位成员，2026-11-26 13:37:16 北京时间真实接口返回 HTTP 200/code 1000，用户截图确认系统通知实际收到，并确认 HTTPS 跳转成功；设备具体型号待核实。
 
 以下 1–3 步为重建参考，现有环境不要重复创建数据库；从第 4 步配置 Secret 开始。
 
@@ -17,7 +17,10 @@
 7. 用个人测试凭证发两种通知，确认实际收到；接口受理不等于送达。WxPusher 通知点开第三方 App 可能需要用户设置。
 8. 测试完删除 PROBE_MEMBERS，停用测试 Worker；保留新 D1 给正式工程迁移。
 
-## 验收记录（未执行）
+## 延时通知测试
+打开 https://qidongapp-probe.rainy256.workers.dev/delay ，提交个人测试凭证，确认已预约后关闭启动 App、清除其后台并锁屏。云端 D1 持久化任务，Cron 每分钟扫描，至少延迟 60 秒，通常 1–2 分钟。5 分钟未执行过期。每人最多一条待发送任务，不自动重试结果未知的发送，避免重复通知。无需升级 APK。Cron 启用或修改后可能有传播延迟。真实锁屏及后台关闭验收待执行。
+
+## 三台设备验收记录（待逐台核实）
 |设备|安装/启动|锁屏通知|App 被关闭后通知|Scheme 冷/热启动|HTTPS 入口|
 |---|---|---|---|---|---|
 |鸿蒙 4.2|待测|待测|待测|待测|待测|
