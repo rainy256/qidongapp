@@ -27,3 +27,6 @@ Android Keystore AES-GCM 原生插件已编写，产品构建配置单独生成 
 
 ## 简化版签名（推荐，覆盖前述四项配置步骤）
 三个成员共用同一固定发布签名。仅配置一个 Actions Secret `ANDROID_SIGNING_BUNDLE`（Base64 封装的 JSON：version=1, keystore, password, alias, keyPassword）；它含完整私钥及密码，必须私下备份，不得提交源码。旧四项 Secrets 作为兼容回退，不必同时配置。正式签名工作流从 main 手动输入 vX.Y.Z 即可，签名成功后创建 tag 并发布 APK。可以先手动运行 Check signing configuration 验证 Secret 格式；真正签名及覆盖升级仍需实测。不得更换已经用于正式发布的密钥。探针 Debug APK 与正式签名不同，不能直接覆盖。
+
+## 版本号触发发布
+修改 main 上的 `product/RELEASE_VERSION` 为新的 `vX.Y.Z` 可触发正式签名发布；工作流也保留手动和 tag 触发入口。同一版本不可覆盖已有 Release，签名完成且验证成功后才发布。首次申请发布 v0.1.0，签名 Secret 由仓库所有者自行配置，仍需以工作流实际结果为准。

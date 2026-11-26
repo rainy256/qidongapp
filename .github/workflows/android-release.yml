@@ -2,6 +2,8 @@ name: Signed Android release
 on:
   push:
     tags: ['v*']
+    branches: ['main']
+    paths: ['product/RELEASE_VERSION']
   workflow_dispatch:
     inputs:
       tag:
@@ -23,8 +25,11 @@ jobs:
           fetch-depth: 0
       - name: Validate release version
         env:
-          RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+          RELEASE_TAG: ${{ github.event.inputs.tag || (github.ref_type == 'tag' && github.ref_name) || '' }}
         run: |
+          if [ -z "$RELEASE_TAG" ]; then
+            RELEASE_TAG="$(cat product/RELEASE_VERSION)"
+          fi
           [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
           echo "RELEASE_TAG=$RELEASE_TAG" >> "$GITHUB_ENV"
           echo "VITE_APP_VERSION=${RELEASE_TAG#v}" >> "$GITHUB_ENV"
