@@ -1,4 +1,5 @@
 import {MEMBER_IDS,REPLIES,GAMES,normalizeSchedule,replyColumn,mutationValid,secretValid,digest,newToken,inviteView} from './logic.mjs';
+import {latestVersion} from './version.mjs';
 import {encryptSpt,validSpt} from './spt.mjs';
 import {effectiveSchedule,normalizeTemplate,updateOverrides,ownSchedule,writeWeekly} from './weekly.mjs';
 import {drainPush} from './push.mjs';
@@ -26,6 +27,7 @@ export default {async fetch(req,env,ctx){
    return member?json({member,token}):json({error:'invalid_activation'},401);
   }
   const me=await authenticate(req,env);if(!me)return json({error:'unauthorized'},401);
+  if(path==='/api/version'&&req.method==='GET'){try{return json(await latestVersion());}catch{return json({error:'version_unavailable'},503);}}
   if(path==='/api/push'&&req.method==='GET'){
    const r=await env.DB.prepare('SELECT bound_at FROM app_push_bindings WHERE member_id=?').bind(me.id).first();
    const pref=await env.DB.prepare('SELECT quiet_start,quiet_end FROM app_push_preferences WHERE member_id=?').bind(me.id).first();const job=await env.DB.prepare("SELECT id,status,created_at,provider_http,provider_code FROM app_push_jobs WHERE member_id=? AND kind='test' ORDER BY created_at DESC LIMIT 1").bind(me.id).first();return json({bound:!!r,boundAt:r?.bound_at??null,quietStart:pref?.quiet_start??null,quietEnd:pref?.quiet_end??null,test:job??null,keyConfigured:!!env.SPT_ENCRYPTION_KEY});
