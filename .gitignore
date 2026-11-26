@@ -1,0 +1,14 @@
+node_modules/
+dist/
+android/
+.upstream/
+public/art/
+src/upstream-tokens.css
+.dev.vars*
+!.dev.vars.example
+.env*
+!.env.example
+*.jks
+*.keystore
+*.apk
+.wrangler/
