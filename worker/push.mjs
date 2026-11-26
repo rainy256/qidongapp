@@ -1,5 +1,5 @@
 export class WxPusherProvider {
- constructor(fetcher=fetch){this.fetcher=fetcher;}
+ constructor(fetcher=(...args)=>globalThis.fetch(...args)){this.fetcher=fetcher;}
  async send(input){return (await this.sendDetailed(input)).status;}
  async sendDetailed({spt,url}){
   try {
@@ -14,6 +14,6 @@ export class WxPusherProvider {
    if(code!==1000||data?.success===false)return {status:'rejected',http,code,reason:'provider_rejected'};
    if(Array.isArray(data.data)&&data.data.some(x=>x?.code!==1000))return {status:'rejected',http,code,reason:'recipient_rejected',recipientCode:Number.isInteger(data.data.find(x=>x?.code!==1000)?.code)?data.data.find(x=>x?.code!==1000).code:null};
    return {status:'accepted',http,code,reason:'accepted'};
-  }catch(e){return {status:'unknown',http:null,code:null,reason:e?.name==='TimeoutError'||e?.name==='AbortError'?'timeout':'network'};}
+  }catch(e){return {status:'unknown',http:null,code:null,reason:e?.name==='TimeoutError'||e?.name==='AbortError'?'timeout':/illegal invocation|incorrect this|incompatible receiver/i.test(String(e?.message||''))?'illegal_invocation':/ssl|tls|certificate/i.test(String(e?.message||''))?'tls':/dns|resolve/i.test(String(e?.message||''))?'dns':'network'};}
  }
 }
