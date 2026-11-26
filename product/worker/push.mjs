@@ -11,6 +11,17 @@ export class WxPusherProvider{
  }
 }
 export function quietNow(start,end,now){if(start==null||end==null)return false;const m=Math.floor((now+28800000)/60000)%1440;return start<end?m>=start&&m<end:m>=start||m<end;}
+// A queued job is invalidated atomically by the reply trigger. Recheck
+// claimed jobs immediately before sending; a provider call already in flight
+// cannot be recalled.
+export async function arrivalCurrent(env,job,now){
+ if(job.kind!=='arrival')return true;
+ const n=job.member_id;
+ if(!['m1','m2','m3'].includes(n))return false;
+ const col='r'+n[1];
+ const row=await env.DB.prepare('SELECT '+col+' AS reply,'+col+'_eta AS eta,'+n+'_mut AS mutation,expires_at FROM app_invites WHERE id=?').bind(job.invite_id).first();
+ return !!row&&row.expires_at>now&&['5','10','30'].includes(row.reply)&&row.eta===job.due_at&&job.id==='eta:'+job.invite_id+':'+n+':'+row.mutation;
+}
 export async function drainPush(env,now=Date.now()){
  await env.DB.prepare("UPDATE app_push_jobs SET status='expired' WHERE status='queued' AND expires_at<=?").bind(now).run();
  await env.DB.prepare("UPDATE app_push_jobs SET status='unknown',finished_at=? WHERE status='sending' AND claimed_at<?").bind(now,now-120000).run();
@@ -23,12 +34,12 @@ export async function drainPush(env,now=Date.now()){
   try{
    const pref=await env.DB.prepare('SELECT quiet_start,quiet_end FROM app_push_preferences WHERE member_id=?').bind(job.member_id).first();
    const binding=await env.DB.prepare('SELECT spt_cipher FROM app_push_bindings WHERE member_id=?').bind(job.member_id).first();
-   if(job.expires_at<=Date.now())result.status='expired';
+   if(job.expires_at<=Date.now()||!await arrivalCurrent(env,job,Date.now()))result.status='expired';
    else if(job.kind!=='test'&&quietNow(pref?.quiet_start,pref?.quiet_end,Date.now()))result.status='muted';
    else if(!binding)result.status='unbound';
-   else {const spt=await decryptSpt(env,job.member_id,binding.spt_cipher);const url=job.invite_id?'https://qidongapp.apexdaishi.xyz/game/'+job.invite_id:'https://qidongapp.apexdaishi.xyz/open/'+(['reservation','reminder'].includes(job.kind)?'schedule':'me');result=await new WxPusherProvider().send(spt,job.content,url);}
+   else {const spt=await decryptSpt(env,job.member_id,binding.spt_cipher);if(!await arrivalCurrent(env,job,Date.now())){result.status='expired';}else{const url=job.invite_id?'https://qidongapp.apexdaishi.xyz/game/'+job.invite_id:'https://qidongapp.apexdaishi.xyz/open/'+(['reservation','reminder'].includes(job.kind)?'schedule':'me');result=await new WxPusherProvider().send(spt,job.content,url);}}
   }catch{result.status='unknown';}
-  if(result.status==='retry'&&job.attempts<3&&Date.now()+60000<job.expires_at){
+  if(job.kind!=='arrival'&&result.status==='retry'&&job.attempts<3&&Date.now()+60000<job.expires_at){
    await env.DB.prepare("UPDATE app_push_jobs SET status='queued',due_at=?,provider_http=?,provider_code=? WHERE id=? AND status='sending'").bind(Date.now()+60000*job.attempts,result.http,result.code,job.id).run();
   }else{
    await env.DB.prepare("UPDATE app_push_jobs SET status=?,finished_at=?,provider_http=?,provider_code=? WHERE id=? AND status='sending'").bind(result.status==='retry'?'rejected':result.status,Date.now(),result.http,result.code,job.id).run();
