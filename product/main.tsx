@@ -114,7 +114,17 @@ function AppMain() {
     try {
       const data = await apiRequest<Snapshot>(apiBase, '/api/state', t);
       if (id !== requestSerial.current || session.current !== t) return false;
-      setSnap({...data, clientClock: performance.now()});
+      setSnap(old => {
+        // An in-flight read may have started before an acknowledged write.
+        // Keep the newer per-member availability revision until a fresh read.
+        const members = data.members.map(m => {
+          const previous = old?.members.find(x => x.id === m.id);
+          return old?.me.id === data.me.id && previous && (previous.availability_revision ?? 0) > (m.availability_revision ?? 0)
+            ? {...m, available_until:previous.available_until, availability_revision:previous.availability_revision}
+            : m;
+        });
+        return {...data, members, clientClock: performance.now()};
+      });
       setError('');
       return true;
     } catch (e) {
@@ -381,7 +391,7 @@ function AppMain() {
             nights: scheduleSnap.nights,
             targetPlayers: 3,
             durationSlots: 2,
-            earliestStart: Math.ceil(snap.now / 1800000),
+            earliestStart: Math.floor(snap.now / 1800000)+1,
             submissions: scheduleSnap.submissions,
           }).filter((x) => x.missingPlayers === 0)
         : [],
