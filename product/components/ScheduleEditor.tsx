@@ -215,20 +215,12 @@ export function ScheduleEditor({
 
   const combinedCells = useMemo(() => {
     if (!activeNight) return [];
-    return computeOthersSlotAvailability({
-      night: activeNight,
-      submissions: effectiveSubmissions,
-      excludeMemberId: null,
-    });
+    return computeOthersSlotAvailability(activeNight, effectiveSubmissions, null);
   }, [activeNight, effectiveSubmissions]);
 
   const othersCells = useMemo(() => {
     if (!activeNight) return [];
-    return computeOthersSlotAvailability({
-      night: activeNight,
-      submissions: snapshot.submissions,
-      excludeMemberId: snapshot.viewer.memberId,
-    });
+    return computeOthersSlotAvailability(activeNight, snapshot.submissions, snapshot.viewer.memberId);
   }, [activeNight, snapshot.submissions, snapshot.viewer.memberId]);
 
   const quickJoinSpan = useMemo(() => bestFutureSpan(othersCells, earliestStart), [othersCells, earliestStart]);
@@ -236,11 +228,7 @@ export function ScheduleEditor({
   const peakByNight = useMemo(() => {
     const map = new Map<string, number>();
     for (const night of snapshot.nights) {
-      const cells = computeOthersSlotAvailability({
-        night,
-        submissions: effectiveSubmissions,
-        excludeMemberId: null,
-      });
+      const cells = computeOthersSlotAvailability(night, effectiveSubmissions, null);
       const peak = cells.filter(c => c.slot >= earliestStart).reduce((max, c) => Math.max(max, c.count), 0);
       map.set(night.id, peak);
     }
@@ -267,26 +255,14 @@ export function ScheduleEditor({
 
   const feedback = useMemo(() => {
     if (!isEditing) return null;
-    return computeDraftFeedback({
-      nights: snapshot.nights,
-      targetPlayers: snapshot.targetPlayers,
-      durationSlots: snapshot.durationSlots,
-      earliestStart,
-      submissions: snapshot.submissions,
-      viewerMemberId: snapshot.viewer.memberId,
-      draftMode,
-      draftPicks: allDraftPicks,
-    });
+    return computeDraftFeedback(snapshot, allDraftPicks, draftMode, isDirty, earliestStart);
   }, [
     allDraftPicks,
     draftMode,
     earliestStart,
     isEditing,
-    snapshot.durationSlots,
-    snapshot.nights,
-    snapshot.submissions,
-    snapshot.targetPlayers,
-    snapshot.viewer.memberId,
+    isDirty,
+    snapshot,
   ]);
 
   const mySavedActiveSpans: Span[] = useMemo(() => {
