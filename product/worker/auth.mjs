@@ -1,5 +1,4 @@
 import {MEMBER_IDS,secretValid,digest,newToken} from './logic.mjs';
-import {webCookie,sessionCookie,validWebWrite} from './pwa.mjs';
 const TTL=365*86400000,ITERATIONS=100000;
 const hex=bytes=>Array.from(new Uint8Array(bytes),v=>v.toString(16).padStart(2,'0')).join('');
 const unhex=s=>Uint8Array.from(s.match(/../g),v=>parseInt(v,16));
@@ -17,25 +16,22 @@ export async function allowAttempt(env,scope,now,max=10){
 }
 export async function authenticate(req,env,now){
  const auth=req.headers.get('Authorization')||'';
- const token=auth?auth.startsWith('Bearer ')?auth.slice(7):'':webCookie(req);
- if(!secretValid(token)||(!auth&&req.method!=='GET'&&!validWebWrite(req)))return null;
+ const token=auth.startsWith('Bearer ')?auth.slice(7):'';
+ if(!secretValid(token))return null;
  const hash=await digest(token);
- const row=await env.DB.prepare('SELECT m.id,m.nickname,s.id AS session_id,s.generation FROM app_sessions s JOIN app_members m ON m.id=s.member_id JOIN app_credentials c ON c.member_id=s.member_id AND c.generation=s.generation WHERE s.token_hash=? AND s.expires_at>?').bind(hash,now).first();
- if(row)return {member:{id:row.id,nickname:row.nickname},sessionId:row.session_id,hash,generation:row.generation,web:!auth};
+ const row=await env.DB.prepare('SELECT m.id,m.nickname,s.id AS session_id,s.generation FROM app_sessions s JOIN app_members m ON m.id=s.member_id JOIN app_credentials c ON c.member_id=s.member_id AND c.generation=s.generation WHERE s.kind=\'android\' AND s.token_hash=? AND s.expires_at>?').bind(hash,now).first();
+ if(row)return {member:{id:row.id,nickname:row.nickname},sessionId:row.session_id,hash,generation:row.generation};
  const old=await env.DB.prepare('SELECT id,nickname FROM app_members WHERE token_hash=?').bind(hash).first();
- return old?{member:old,sessionId:'legacy',hash,generation:null,web:!auth}:null;
+ return old?{member:old,sessionId:'legacy',hash,generation:null}:null;
 }
 const err=(json,code,status)=>json({error:code},status);
-async function newSession(env,member,generation,web,now,json,headers){
+async function newSession(env,member,generation,now,json){
  const token=newToken(),id=crypto.randomUUID();
- const row=await env.DB.prepare('INSERT INTO app_sessions(id,member_id,token_hash,generation,kind,created_at,expires_at) SELECT ?,member_id,?,generation,?,?,? FROM app_credentials WHERE member_id=? AND generation=? RETURNING id').bind(id,await digest(token),web?'web':'android',now,now+TTL,member.id,generation).first();
+ const row=await env.DB.prepare('INSERT INTO app_sessions(id,member_id,token_hash,generation,kind,created_at,expires_at) SELECT ?,member_id,?,generation,?,?,? FROM app_credentials WHERE member_id=? AND generation=? RETURNING id').bind(id,await digest(token),'android',now,now+TTL,member.id,generation).first();
  if(!row)return err(json,'credential_changed',409);
- if(web){const h=new Headers(headers);h.set('Set-Cookie',sessionCookie(token));return new Response(JSON.stringify({member}),{headers:h});}
  return json({member,token});
 }
-export async function login(req,env,b,now,json,headers){
- const web=new URL(req.url).pathname==='/api/web/login';
- if(web&&!validWebWrite(req))return err(json,'invalid_origin',403);
+export async function login(env,b,now,json){
  if(!MEMBER_IDS.includes(b?.memberId)||!passwordValid(b?.password))return err(json,'invalid_login',401);
  if(!await allowAttempt(env,'login:'+b.memberId,now))return err(json,'rate_limited',429);
  const member=await env.DB.prepare('SELECT id,nickname,activation_hash,activated_at FROM app_members WHERE id=?').bind(b.memberId).first();
@@ -49,13 +45,13 @@ export async function login(req,env,b,now,json,headers){
   credential=await env.DB.prepare('INSERT INTO app_credentials(member_id,salt,password_hash,generation,updated_at) SELECT id,?,?,?,? FROM app_members WHERE id=? AND activated_at IS NULL AND activation_hash=? ON CONFLICT(member_id) DO NOTHING RETURNING generation').bind(c.salt,c.hash,c.generation,now,member.id,member.activation_hash).first();
   if(!credential)return err(json,'credential_changed',409);
  }
- return newSession(env,{id:member.id,nickname:member.nickname},credential.generation,web,now,json,headers);
+ return newSession(env,{id:member.id,nickname:member.nickname},credential.generation,now,json);
 }
-export async function account(req,env,a,b,now,json,headers){
+export async function account(req,env,a,b,now,json){
  const path=new URL(req.url).pathname,member=a.member;
  const c=await env.DB.prepare('SELECT salt,password_hash,generation FROM app_credentials WHERE member_id=?').bind(member.id).first();
  if(path==='/api/account'&&req.method==='GET'){
-  const rows=c?(await env.DB.prepare('SELECT id,kind,created_at,expires_at FROM app_sessions WHERE member_id=? AND generation=? AND expires_at>? ORDER BY created_at DESC').bind(member.id,c.generation,now).all()).results:[];
+  const rows=c?(await env.DB.prepare('SELECT id,kind,created_at,expires_at FROM app_sessions WHERE kind=\'android\' AND member_id=? AND generation=? AND expires_at>? ORDER BY created_at DESC').bind(member.id,c.generation,now).all()).results:[];
   const legacy=await env.DB.prepare('SELECT activated_at FROM app_members WHERE id=? AND token_hash IS NOT NULL').bind(member.id).first();
   return json({passwordConfigured:!!c,currentSession:a.sessionId,sessions:[...rows,...(legacy?[{id:'legacy',kind:'legacy',created_at:legacy.activated_at,expires_at:null}]:[])]});
  }
@@ -73,7 +69,7 @@ export async function account(req,env,a,b,now,json,headers){
    changed=await env.DB.prepare('INSERT INTO app_credentials(member_id,salt,password_hash,generation,updated_at) SELECT id,?,?,?,? FROM app_members WHERE id=? AND token_hash=? ON CONFLICT(member_id) DO NOTHING RETURNING generation').bind(next.salt,next.hash,next.generation,now,member.id,a.hash).first();
   }
   if(!changed)return err(json,'credential_changed',409);
-  return newSession(env,member,next.generation,a.web,now,json,headers);
+  return newSession(env,member,next.generation,now,json);
  }
  if(path==='/api/account/revoke'||path==='/api/account/logout'){
   if(!c)return err(json,'password_required',409);
@@ -81,7 +77,6 @@ export async function account(req,env,a,b,now,json,headers){
   if(typeof target!=='string'||target.length>64)return err(json,'invalid_session',400);
   if(target==='legacy')await env.DB.prepare('UPDATE app_members SET token_hash=NULL WHERE id=?').bind(member.id).run();
   else await env.DB.prepare('DELETE FROM app_sessions WHERE member_id=? AND id=?').bind(member.id,target).run();
-  if(target===a.sessionId&&a.web){const h=new Headers(headers);h.set('Set-Cookie','__Secure-qidong_session=; Path=/api; Max-Age=0; HttpOnly; Secure; SameSite=Strict');return new Response(JSON.stringify({ok:true}),{headers:h});}
   return json({ok:true});
  }
  return err(json,'not_found',404);

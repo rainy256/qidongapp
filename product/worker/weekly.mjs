@@ -15,10 +15,15 @@ export function effectiveSchedule(row,now){
  const out=[];for(let i=0;i<7;i++){const day=start+i*48;if(overrides.has(day)||clip(picks,day,day+48).length&&!row.template_json){out.push(...clip(picks,day,day+48));}else{out.push(...template.filter(x=>x.day===weekday(day)).map(x=>({from:day+x.from,to:day+x.to})));}}
  return merge(out);
 }
-export function updateOverrides(row,picks,now){
+export function scheduleStatus(row,now,schedule=effectiveSchedule(row,now)){
+ if(schedule.some(p=>p.to>Math.ceil(now/1800000)))return 'available';
+ const start=dayStart(now),days=new Set(JSON.parse(row.override_days_json||'[]'));
+ return Array.from({length:7},(_,i)=>start+i*48).every(day=>days.has(day))?'unavailable':'unanswered';
+}
+export function updateOverrides(row,picks,now,markUnavailable=false){
  const target=normalizeSchedule(picks,now),before=effectiveSchedule(row,now),start=dayStart(now),days=new Set(JSON.parse(row.override_days_json||'[]').filter(x=>x>=start&&x<start+336)),stored=JSON.parse(row.schedule_json||'[]');
  let out=[];for(let i=0;i<7;i++){const day=start+i*48,a=clip(before,day,day+48),b=clip(target,day,day+48);
- if(JSON.stringify(a)!==JSON.stringify(b)){days.add(day);out.push(...b);}else if(days.has(day)){out.push(...clip(stored,day,day+48));}}
+ if(markUnavailable||JSON.stringify(a)!==JSON.stringify(b)){days.add(day);out.push(...b);}else if(days.has(day)){out.push(...clip(stored,day,day+48));}}
  return {picks:merge(out),days:[...days].sort((a,b)=>a-b)};
 }
 export async function ownSchedule(env,id){return env.DB.prepare('SELECT m.schedule_json,m.schedule_revision,m.schedule_mutation,w.template_json,w.override_days_json FROM app_members m LEFT JOIN app_weekly w ON m.id=w.member_id WHERE m.id=?').bind(id).first();}

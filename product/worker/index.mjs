@@ -1,9 +1,9 @@
-import {pwaStatic,pwaLanding,sessionCookie,validWebWrite} from './pwa.mjs';
+import {nativeLanding} from './native-links.mjs';
 import {authenticate,login,account,allowAttempt} from './auth.mjs';
 import {MEMBER_IDS,REPLIES,GAMES,normalizeSchedule,replyColumn,mutationValid,secretValid,digest,newToken,inviteView} from './logic.mjs';
 import {latestVersion} from './version.mjs';
 import {encryptSpt,validSpt} from './spt.mjs';
-import {effectiveSchedule,normalizeTemplate,updateOverrides,ownSchedule,writeWeekly} from './weekly.mjs';
+import {effectiveSchedule,scheduleStatus,normalizeTemplate,updateOverrides,ownSchedule,writeWeekly} from './weekly.mjs';
 import {drainPush} from './push.mjs';
 import {reservationApi} from './reservations.mjs';
 const HEADERS={'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','Access-Control-Allow-Origin':'https://localhost','Access-Control-Allow-Headers':'Authorization, Content-Type','Access-Control-Allow-Methods':'GET, POST, OPTIONS','Vary':'Origin'};
@@ -14,28 +14,24 @@ export default {async fetch(req,env,ctx){
  const u=new URL(req.url),path=u.pathname,now=Date.now();
  const kick=()=>ctx.waitUntil(drainPush(env).catch(()=>{}));
  if(req.method==='GET'){
-  if(path==='/'||path==='/app')return Response.redirect(u.origin+'/app/',302);
-  const landing=pwaLanding(path);if(landing)return landing;
-  if(path.startsWith('/app/')||path.startsWith('/art/'))return pwaStatic(req,env);
+  const landing=nativeLanding(path);if(landing)return landing;
+  if(!path.startsWith('/api/'))return json({error:'not_found'},404);
  }
+ if(path==='/api/web'||path.startsWith('/api/web/'))return json({error:'not_found'},404);
  if(req.method==='OPTIONS')return new Response(null,{status:204,headers:HEADERS});
  if(path==='/api/health'&&req.method==='GET')return json({ok:true,stage:'product-foundation'});
  try{
-  if((path==='/api/login'||path==='/api/web/login')&&req.method==='POST')return await login(req,env,await body(req),now,json,HEADERS);
-  if((path==='/api/activate'||path==='/api/web/activate')&&req.method==='POST'){
-   const web=path==='/api/web/activate';if(web&&!validWebWrite(req))return json({error:'invalid_origin'},403);
-   if(web&&await authenticate(req,env,now))return json({error:'already_activated'},409);
+  if(path==='/api/login'&&req.method==='POST')return await login(env,await body(req),now,json);
+  if(path==='/api/activate'&&req.method==='POST'){
    const b=await body(req);if(!secretValid(b?.code)||(b.memberId!==undefined&&!MEMBER_IDS.includes(b.memberId)))return json({error:'invalid_activation'},401);
    if(!await allowAttempt(env,'legacy:'+(b.memberId??'unknown'),now,30))return json({error:'rate_limited'},429);
    const token=newToken();
    const member=await env.DB.prepare('UPDATE app_members SET activation_hash=NULL,token_hash=?,activated_at=?,last_seen=? WHERE activation_hash=? AND activated_at IS NULL AND (? IS NULL OR id=?) RETURNING id,nickname').bind(await digest(token),now,now,await digest(b.code),b.memberId??null,b.memberId??null).first();
    if(!member)return json({error:'invalid_activation'},401);
-   if(web){const headers=new Headers(HEADERS);headers.set('Set-Cookie',sessionCookie(token));return new Response(JSON.stringify({member}),{headers});}
    return json({member,token});
   }
   const auth=await authenticate(req,env,now);if(!auth)return json({error:'unauthorized'},401);const me=auth.member;
-  if(path==='/api/account'||path.startsWith('/api/account/'))return await account(req,env,auth,req.method==='POST'?await body(req):null,now,json,HEADERS);
-  if(path==='/api/web/session'&&req.method==='GET')return json({member:me});
+  if(path==='/api/account'||path.startsWith('/api/account/'))return await account(req,env,auth,req.method==='POST'?await body(req):null,now,json);
   if(path==='/api/version'&&req.method==='GET'){try{return json(await latestVersion());}catch{return json({error:'version_unavailable'},503);}}
   if(path==='/api/push'&&req.method==='GET'){
    const r=await env.DB.prepare('SELECT bound_at FROM app_push_bindings WHERE member_id=?').bind(me.id).first();
@@ -48,7 +44,7 @@ export default {async fetch(req,env,ctx){
     env.DB.prepare('SELECT '+publicInvite+' FROM app_invites WHERE expires_at>? ORDER BY created_at DESC LIMIT 20').bind(now-86400000),
     env.DB.prepare('SELECT id,invite_id,kind,actor,detail,created_at,read_at FROM app_messages WHERE member_id=? ORDER BY created_at DESC LIMIT 100').bind(me.id)
    ]);
-   const extra=await env.DB.batch([env.DB.prepare('SELECT id,creator,game,title,from_slot,to_slot,state,r1,r2,r3,revision FROM app_reservations WHERE to_slot*1800000>? ORDER BY from_slot LIMIT 50').bind(now-86400000),env.DB.prepare('SELECT id,reservation_id,kind,detail,created_at,read_at FROM app_reservation_events WHERE member_id=? ORDER BY created_at DESC LIMIT 100').bind(me.id),env.DB.prepare("SELECT id,invite_id,kind,content AS detail,created_at,status FROM app_push_jobs WHERE member_id=? AND kind='nudge' ORDER BY created_at DESC LIMIT 50").bind(me.id)]);return json({reservations:extra[0].results,reservationMessages:extra[1].results,nudges:extra[2].results,me,members:r[1].results.map(x=>({id:x.id,nickname:x.nickname,schedule_revision:x.schedule_revision,last_seen:x.last_seen,schedule:effectiveSchedule(x,now),...(x.id===me.id?{template:JSON.parse(x.template_json||'[]'),overrideDays:JSON.parse(x.override_days_json||'[]')}:{} )})),invites:r[2].results.map(x=>inviteView(x,now)),messages:r[3].results,now});
+   const extra=await env.DB.batch([env.DB.prepare('SELECT id,creator,game,title,from_slot,to_slot,state,r1,r2,r3,revision FROM app_reservations WHERE to_slot*1800000>? ORDER BY from_slot LIMIT 50').bind(now-86400000),env.DB.prepare('SELECT id,reservation_id,kind,detail,created_at,read_at FROM app_reservation_events WHERE member_id=? ORDER BY created_at DESC LIMIT 100').bind(me.id),env.DB.prepare("SELECT id,invite_id,kind,content AS detail,created_at,status FROM app_push_jobs WHERE member_id=? AND kind='nudge' ORDER BY created_at DESC LIMIT 50").bind(me.id)]);return json({reservations:extra[0].results,reservationMessages:extra[1].results,nudges:extra[2].results,me,members:r[1].results.map(x=>({id:x.id,nickname:x.nickname,schedule_revision:x.schedule_revision,last_seen:x.last_seen,schedule:effectiveSchedule(x,now),scheduleStatus:scheduleStatus(x,now),...(x.id===me.id?{template:JSON.parse(x.template_json||'[]'),overrideDays:JSON.parse(x.override_days_json||'[]')}:{} )})),invites:r[2].results.map(x=>inviteView(x,now)),messages:r[3].results,now});
   }
   if(req.method!=='POST')return json({error:'not_found'},404);
   const b=await body(req);if(!b||typeof b!=='object')return json({error:'invalid_body'},400);
@@ -114,7 +110,12 @@ export default {async fetch(req,env,ctx){
    if(current.schedule_revision!==b.revision)return json({error:'revision_conflict'},409);
    let template=JSON.parse(current.template_json||'[]'),days=JSON.parse(current.override_days_json||'[]'),picks=JSON.parse(current.schedule_json||'[]');
    try{
-    if(path==='/api/schedule'){const next=updateOverrides(current,b.picks,now);days=next.days;picks=next.picks;}
+    if(path==='/api/schedule'){
+     if(b.unavailable!==undefined&&typeof b.unavailable!=='boolean')return json({error:'invalid_schedule'},400);
+     const explicit=b.unavailable===true||(b.unavailable===undefined&&Array.isArray(b.picks)&&b.picks.length===0);
+     if(explicit&&Array.isArray(b.picks)&&b.picks.some(p=>p?.to>Math.ceil(now/1800000)))return json({error:'invalid_schedule'},400);
+     const next=updateOverrides(current,b.picks,now,explicit);days=next.days;picks=next.picks;
+    }
     if(path==='/api/schedule/template')template=normalizeTemplate(b.template);
     if(path==='/api/schedule/reset-day'){
      if(!Number.isSafeInteger(b.day)||!days.includes(b.day))return json({error:'invalid_day'},400);
