@@ -22,7 +22,7 @@ export default {async fetch(req,env,ctx){
  if(req.method==='GET'){
   if(path==='/'||path==='/app')return Response.redirect(u.origin+'/app/',302);
   const landing=pwaLanding(path);if(landing)return landing;
-  if(path.startsWith('/app/')||path.startsWith('/art/'))return pwaStatic(req);
+  if(path.startsWith('/app/')||path.startsWith('/art/'))return pwaStatic(req,env);
  }
  if(req.method==='OPTIONS')return new Response(null,{status:204,headers:HEADERS});
  if(path==='/api/health'&&req.method==='GET')return json({ok:true,stage:'product-foundation'});

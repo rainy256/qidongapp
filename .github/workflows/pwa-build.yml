@@ -21,6 +21,7 @@ jobs:
       - run: npm run test:product
       - run: python3 -m pip install --user Pillow
       - run: npm run build:pwa
+      - run: python3 product/pwa/export.py
       - name: Verify public build
         run: |
           test -s dist-pwa/index.html
@@ -41,6 +42,7 @@ jobs:
             git rm -rf --ignore-unmatch .
           }
           cd "$RUNNER_TEMP/pwa-tree"
+          rm -rf transfer
           cp -a "$RUNNER_TEMP/qidong-pwa/." .
           touch .nojekyll
           printf '%s\n' "$GITHUB_SHA" > BUILD_REVISION

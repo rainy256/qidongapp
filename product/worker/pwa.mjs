@@ -1,4 +1,3 @@
-const RAW='https://raw.githubusercontent.com/rainy256/qidongapp/pwa-static/';
 const ART=/^art\/(?:bg-wallpaper\.jpg|hero-runner\.png|game-(?:apex|gta|tarkov|custom)\.png)$/;
 const ASSET=/^assets\/[A-Za-z0-9_.-]+\.(?:js|css|png|jpg|webp|svg|woff2?)$/;
 const STATIC=new Set(['index.html','offline.html','manifest.webmanifest','sw.js','icons/icon-192.png','icons/icon-512.png']);
@@ -9,16 +8,16 @@ export function staticName(path){
  return STATIC.has(p)||ART.test(p)||ASSET.test(p)?p:null;
 }
 const types={html:'text/html; charset=utf-8',js:'application/javascript; charset=utf-8',css:'text/css; charset=utf-8',webmanifest:'application/manifest+json; charset=utf-8',png:'image/png',jpg:'image/jpeg',webp:'image/webp',svg:'image/svg+xml',woff:'font/woff',woff2:'font/woff2'};
-export async function pwaStatic(req,fetcher=(...args)=>globalThis.fetch(...args)){
+export async function pwaStatic(req,env){
  const name=staticName(new URL(req.url).pathname);
  if(!name)return new Response('Not found',{status:404,headers:{...baseHeaders,'Cache-Control':'no-store'}});
  try{
-  // Use a fixed public build branch. Never forward cookies, authorization or user-controlled URLs.
-  const upstream=await fetcher(RAW+name,{method:'GET',redirect:'error',headers:{Accept:'*/*'},cf:{cacheTtl:ASSET.test(name)?86400:0}});
-  if(!upstream.ok)return new Response('网页版暂未就绪，请稍后重新打开。',{status:upstream.status===404?404:503,headers:{...baseHeaders,'Content-Type':'text/plain; charset=utf-8','Cache-Control':'no-store'}});
-  const headers={...baseHeaders,'Content-Type':types[name.split('.').pop()]||'application/octet-stream','Cache-Control':ASSET.test(name)?'public, max-age=31536000, immutable':ART.test(name)?'public, max-age=86400':'no-store'};
-  return new Response(upstream.body,{headers});
- }catch{return new Response('网页版暂时无法加载，请重新连接。',{status:503,headers:{...baseHeaders,'Content-Type':'text/plain; charset=utf-8','Cache-Control':'no-store'}});}
+  if(!env.PWA_ASSETS)return new Response('网页版资源尚未部署。',{status:503,headers:{...baseHeaders,'Content-Type':'text/plain; charset=utf-8','Cache-Control':'no-store'}});
+  const {value,metadata}=await env.PWA_ASSETS.getWithMetadata(name,{type:'arrayBuffer'});
+  if(!value)return new Response('资源不存在，请重新打开网页。',{status:404,headers:{...baseHeaders,'Content-Type':'text/plain; charset=utf-8','Cache-Control':'no-store'}});
+  const headers={...baseHeaders,'Content-Type':metadata?.type||types[name.split('.').pop()]||'application/octet-stream','Cache-Control':ASSET.test(name)?'public, max-age=31536000, immutable':ART.test(name)?'public, max-age=86400':'no-store'};
+  return new Response(value,{headers});
+ }catch{return new Response('网页版资源读取失败，请重新连接。',{status:503,headers:{...baseHeaders,'Content-Type':'text/plain; charset=utf-8','Cache-Control':'no-store'}});}
 }
 export function pwaLanding(path){
  const invite=path.match(/^\/game\/([0-9a-f-]{36})$/)?.[1],page=path.match(/^\/open\/(schedule|me|messages)$/)?.[1];

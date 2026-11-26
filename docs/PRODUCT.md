@@ -38,3 +38,5 @@ Android Keystore AES-GCM 原生插件已编写，产品构建配置单独生成 
 独立地址 `https://qidongapp.apexdaishi.xyz/app/`，由同一正式 Worker 提供入口与 API。GitHub Actions `Publish PWA static build` 构建至 `dist-pwa` 并发布独立 `pwa-static` 分支；Worker 仅向固定公开分支读取白名单静态文件，不转发认证头或 Cookie，不依赖浏览器直连 GitHub。APK 构建保持原路径。网页激活用 HttpOnly/Secure/SameSite=Strict Cookie（API 路径），写操作必须同源 JSON；旧 APK 仍用原 Bearer。通知入口可选择网页或 APK。PWA 清除浏览器数据可能需要管理员重新授权；同一成员仍为单设备授权，尚无多设备绑定。Service Worker 只缓存离线提示，不缓存私人数据，联网方可约局。鸿蒙浏览器是否支持独立窗口/桌面安装需真机确认。签发口令与 SPT 加密密钥仍需安全初始化，不由网页公开配置。
 
 正式自定义域名 qidongapp.apexdaishi.xyz 已绑定独立 qidongapp Worker；旧 workers.dev 入口保留供已安装 APK 使用。新 APK 默认 API 与新的通知链接使用自定义域名，网页使用同源 API。原 qidong Worker 和其两个域名不变。
+
+PWA 线上运行不再从 GitHub Raw 拉资源，改用专属 Cloudflare KV 绑定 PWA_ASSETS。构建流程导出公开资源的 Base64 分片到 pwa-static/transfer，部署时按清单写入 KV（index.html 最后写入）；仅公开静态资源，不包含身份、口令或 SPT。PWA 图像使用同一原图的压缩版本，APK 不变。
