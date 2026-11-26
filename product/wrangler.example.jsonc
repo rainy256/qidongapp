@@ -4,7 +4,7 @@
   "compatibility_date": "2026-11-24",
   "workers_dev": true,
   "preview_urls": false,
-  "vars": { "ENABLE_REBOOKING": "false" },
+  "vars": { "ENABLE_REBOOKING": "true" },
   "d1_databases": [
     {
       "binding": "DB",
