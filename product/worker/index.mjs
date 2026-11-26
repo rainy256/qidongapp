@@ -1,5 +1,6 @@
 import {MEMBER_IDS,REPLIES,GAMES,normalizeSchedule,replyColumn,mutationValid,secretValid,digest,newToken,inviteView} from './logic.mjs';
 import {encryptSpt,validSpt} from './spt.mjs';
+import {effectiveSchedule,normalizeTemplate,updateOverrides,ownSchedule,writeWeekly} from './weekly.mjs';
 import {drainPush} from './push.mjs';
 import {reservationApi} from './reservations.mjs';
 const HEADERS={'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','Access-Control-Allow-Origin':'https://localhost','Access-Control-Allow-Headers':'Authorization, Content-Type','Access-Control-Allow-Methods':'GET, POST, OPTIONS','Vary':'Origin'};
@@ -32,11 +33,11 @@ export default {async fetch(req,env,ctx){
   if(path==='/api/state'&&req.method==='GET'){
    const r=await env.DB.batch([
     env.DB.prepare('UPDATE app_members SET last_seen=? WHERE id=? AND (last_seen IS NULL OR last_seen<?)').bind(now,me.id,now-30000),
-    env.DB.prepare('SELECT id,nickname,schedule_json,schedule_revision,last_seen FROM app_members ORDER BY id'),
+    env.DB.prepare('SELECT m.id,m.nickname,m.schedule_json,m.schedule_revision,m.last_seen,w.template_json,w.override_days_json FROM app_members m LEFT JOIN app_weekly w ON w.member_id=m.id ORDER BY m.id'),
     env.DB.prepare('SELECT '+publicInvite+' FROM app_invites WHERE expires_at>? ORDER BY created_at DESC LIMIT 20').bind(now-86400000),
     env.DB.prepare('SELECT id,invite_id,kind,actor,detail,created_at,read_at FROM app_messages WHERE member_id=? ORDER BY created_at DESC LIMIT 100').bind(me.id)
    ]);
-   const extra=await env.DB.batch([env.DB.prepare('SELECT id,creator,game,title,from_slot,to_slot,state,r1,r2,r3,revision FROM app_reservations WHERE to_slot*1800000>? ORDER BY from_slot LIMIT 50').bind(now-86400000),env.DB.prepare('SELECT id,reservation_id,kind,detail,created_at,read_at FROM app_reservation_events WHERE member_id=? ORDER BY created_at DESC LIMIT 100').bind(me.id),env.DB.prepare("SELECT id,invite_id,kind,content AS detail,created_at,status FROM app_push_jobs WHERE member_id=? AND kind='nudge' ORDER BY created_at DESC LIMIT 50").bind(me.id)]);return json({reservations:extra[0].results,reservationMessages:extra[1].results,nudges:extra[2].results,me,members:r[1].results.map(({schedule_json,...x})=>({...x,schedule:JSON.parse(schedule_json)})),invites:r[2].results.map(x=>inviteView(x,now)),messages:r[3].results,now});
+   const extra=await env.DB.batch([env.DB.prepare('SELECT id,creator,game,title,from_slot,to_slot,state,r1,r2,r3,revision FROM app_reservations WHERE to_slot*1800000>? ORDER BY from_slot LIMIT 50').bind(now-86400000),env.DB.prepare('SELECT id,reservation_id,kind,detail,created_at,read_at FROM app_reservation_events WHERE member_id=? ORDER BY created_at DESC LIMIT 100').bind(me.id),env.DB.prepare("SELECT id,invite_id,kind,content AS detail,created_at,status FROM app_push_jobs WHERE member_id=? AND kind='nudge' ORDER BY created_at DESC LIMIT 50").bind(me.id)]);return json({reservations:extra[0].results,reservationMessages:extra[1].results,nudges:extra[2].results,me,members:r[1].results.map(x=>({id:x.id,nickname:x.nickname,schedule_revision:x.schedule_revision,last_seen:x.last_seen,schedule:effectiveSchedule(x,now),...(x.id===me.id?{template:JSON.parse(x.template_json||'[]'),overrideDays:JSON.parse(x.override_days_json||'[]')}:{} )})),invites:r[2].results.map(x=>inviteView(x,now)),messages:r[3].results,now});
   }
   if(req.method!=='POST')return json({error:'not_found'},404);
   const b=await body(req);if(!b||typeof b!=='object')return json({error:'invalid_body'},400);
@@ -94,13 +95,23 @@ export default {async fetch(req,env,ctx){
    const retry=await env.DB.prepare('SELECT '+publicInvite+' FROM app_invites WHERE id=? AND '+mut+'=?').bind(match[1],b.mutation).first();
    return retry?json({invite:inviteView(retry,now)}):json({error:'revision_conflict_or_expired'},409);
   }
-  if(path==='/api/schedule'){
+  if(['/api/schedule','/api/schedule/template','/api/schedule/reset-day'].includes(path)){
    if(!mutationValid(b.mutation)||!Number.isSafeInteger(b.revision))return json({error:'invalid_schedule'},400);
-   let schedule;try{schedule=normalizeSchedule(b.picks,now);}catch{return json({error:'invalid_schedule'},400);}
-   const saved=await env.DB.prepare("UPDATE app_members SET schedule_json=?,schedule_revision=schedule_revision+1,schedule_mutation=? WHERE id=? AND schedule_revision=? AND COALESCE(schedule_mutation,'')<>? RETURNING schedule_revision").bind(JSON.stringify(schedule),b.mutation,me.id,b.revision,b.mutation).first();
+   const current=await ownSchedule(env,me.id);
+   if(current.schedule_mutation===b.mutation)return json({schedule_revision:current.schedule_revision});
+   if(current.schedule_revision!==b.revision)return json({error:'revision_conflict'},409);
+   let template=JSON.parse(current.template_json||'[]'),days=JSON.parse(current.override_days_json||'[]'),picks=JSON.parse(current.schedule_json||'[]');
+   try{
+    if(path==='/api/schedule'){const next=updateOverrides(current,b.picks,now);days=next.days;picks=next.picks;}
+    if(path==='/api/schedule/template')template=normalizeTemplate(b.template);
+    if(path==='/api/schedule/reset-day'){
+     if(!Number.isSafeInteger(b.day)||!days.includes(b.day))return json({error:'invalid_day'},400);
+     days=days.filter(x=>x!==b.day);picks=picks.flatMap(p=>[{from:p.from,to:Math.min(p.to,b.day)},{from:Math.max(p.from,b.day+48),to:p.to}].filter(q=>q.to>q.from));
+    }
+   }catch{return json({error:'invalid_schedule'},400);}
+   const saved=await writeWeekly(env,me.id,b.revision,b.mutation,template,days,picks);
    if(saved)return json(saved);
-   const retry=await env.DB.prepare('SELECT schedule_revision FROM app_members WHERE id=? AND schedule_mutation=?').bind(me.id,b.mutation).first();
-   return retry?json(retry):json({error:'revision_conflict'},409);
+   const latest=await ownSchedule(env,me.id);return latest.schedule_mutation===b.mutation?json({schedule_revision:latest.schedule_revision}):json({error:'revision_conflict'},409);
   }
   if(path==='/api/messages/read'){
    if(typeof b.id!=='string'||b.id.length>180)return json({error:'invalid_message'},400);
