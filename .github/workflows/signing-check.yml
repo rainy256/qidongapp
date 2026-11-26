@@ -1,0 +1,24 @@
+name: Check signing configuration
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check secret is configured without printing it
+        env:
+          ANDROID_SIGNING_BUNDLE: ${{ secrets.ANDROID_SIGNING_BUNDLE }}
+        run: |
+          python3 - <<'PY'
+          import base64, json, os
+          try:
+              b=json.loads(base64.b64decode(os.environ["ANDROID_SIGNING_BUNDLE"].strip(),validate=True))
+              assert b["version"]==1
+              assert all(isinstance(b[k],str) and b[k] for k in ("keystore","password","alias","keyPassword"))
+              assert len(base64.b64decode(b["keystore"],validate=True))>100
+          except Exception:
+              raise SystemExit("Signing bundle missing or malformed")
+          print("Signing bundle format confirmed (actual signature not tested)")
+          PY

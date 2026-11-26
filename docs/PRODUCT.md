@@ -24,3 +24,6 @@ Android Keystore AES-GCM 原生插件已编写，产品构建配置单独生成 
 安装 JDK 21 和 GitHub CLI，使用自己的 GitHub 管理员账号运行 `powershell -File product/scripts/setup-signing.ps1`（按本机 PowerShell 策略允许已审查的本地脚本）。脚本仅在四项签名 Secrets 均不存在时配置首次发布，若已存在则拒绝覆盖。密钥默认保存在用户目录 qidongapp-signing，密码由本人设置，不写入代码。脚本若中途失败，请保留本地 JKS，核对已有 Secrets 后补齐，禁止生成替换密钥。脚本仅验证 Secret 名称，真实签名以发布工作流为准。
 
 用户确认探针延时提醒已收到；鸿蒙7可原生运行 WxPusher，无需用卓易通运行 WxPusher。qidongapp APK 在鸿蒙7自身安装、跳转仍需验收。
+
+## 简化版签名（推荐，覆盖前述四项配置步骤）
+三个成员共用同一固定发布签名。仅配置一个 Actions Secret `ANDROID_SIGNING_BUNDLE`（Base64 封装的 JSON：version=1, keystore, password, alias, keyPassword）；它含完整私钥及密码，必须私下备份，不得提交源码。旧四项 Secrets 作为兼容回退，不必同时配置。正式签名工作流从 main 手动输入 vX.Y.Z 即可，签名成功后创建 tag 并发布 APK。可以先手动运行 Check signing configuration 验证 Secret 格式；真正签名及覆盖升级仍需实测。不得更换已经用于正式发布的密钥。探针 Debug APK 与正式签名不同，不能直接覆盖。

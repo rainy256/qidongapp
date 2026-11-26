@@ -5,10 +5,13 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Existing semantic version tag (vX.Y.Z)'
+        description: 'Release version (vX.Y.Z); creates tag after successful signing'
         required: true
 permissions:
   contents: write
+concurrency:
+  group: qidongapp-release
+  cancel-in-progress: false
 jobs:
   release:
     runs-on: ubuntu-latest
@@ -16,7 +19,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.inputs.tag || github.ref_name }}
+          ref: ${{ github.sha }}
+          fetch-depth: 0
       - name: Validate release version
         env:
           RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
@@ -24,7 +28,10 @@ jobs:
           [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
           echo "RELEASE_TAG=$RELEASE_TAG" >> "$GITHUB_ENV"
           echo "VITE_APP_VERSION=${RELEASE_TAG#v}" >> "$GITHUB_ENV"
-          git show-ref --verify "refs/tags/$RELEASE_TAG"
+          if git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"; then
+            test "$(git rev-list -n 1 "$RELEASE_TAG")" = "$(git rev-parse HEAD)"
+          fi
+          echo "RELEASE_COMMIT=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -42,21 +49,12 @@ jobs:
       - run: cd android && ./gradlew assembleRelease --no-daemon
       - name: Sign and verify release APK
         env:
+          ANDROID_SIGNING_BUNDLE: ${{ secrets.ANDROID_SIGNING_BUNDLE }}
           KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: |
-          test -n "$KEYSTORE_B64" && test -n "$KEYSTORE_PASSWORD" && test -n "$KEY_ALIAS" && test -n "$KEY_PASSWORD"
-          umask 077
-          keyfile="$RUNNER_TEMP/qidongapp-release.jks"
-          trap 'rm -f "$keyfile"' EXIT
-          printf '%s' "$KEYSTORE_B64" | base64 -d > "$keyfile"
-          tools="$ANDROID_HOME/build-tools/35.0.0"
-          "$tools/zipalign" -P 16 -f 4 android/app/build/outputs/apk/release/app-release-unsigned.apk "$RUNNER_TEMP/aligned.apk"
-          "$tools/apksigner" sign --ks "$keyfile" --ks-key-alias "$KEY_ALIAS" --ks-pass env:KEYSTORE_PASSWORD --key-pass env:KEY_PASSWORD --out qidongapp.apk "$RUNNER_TEMP/aligned.apk"
-          "$tools/apksigner" verify --verbose qidongapp.apk
-          sha256sum qidongapp.apk > qidongapp.apk.sha256
+        run: python3 product/scripts/sign-release.py
       - uses: actions/upload-artifact@v4
         with:
           name: qidongapp-signed
@@ -72,4 +70,4 @@ jobs:
             echo 'Release already exists; refusing to replace signed assets.'
             exit 1
           fi
-          gh release create "$RELEASE_TAG" --verify-tag --title "启动！ $RELEASE_TAG" --generate-notes qidongapp.apk qidongapp.apk.sha256
+          gh release create "$RELEASE_TAG" --target "$RELEASE_COMMIT" --title "启动！ $RELEASE_TAG" --generate-notes qidongapp.apk qidongapp.apk.sha256
