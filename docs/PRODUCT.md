@@ -46,3 +46,6 @@ PWA 线上运行不再从 GitHub Raw 拉资源，改用专属 Cloudflare KV 绑�
 
 ## APK 国内直连入口
 用户实际测试确认 `https://qidong.apexdaishi.xyz/app-api/health` 无代理可访问。独立 Worker `qidongapp-api-entry` 仅匹配 `qidong.apexdaishi.xyz/app-api/*`，使用 service binding APP 调用 qidongapp，剥除旧网站 Cookie，不改变旧站的代码、数据库、其他路由。APK 默认使用此入口，包括账号、推送和版本检查。PWA 仍同源访问原独立子域名，避免与旧站 Cookie 共用。旧 API 域名保持兼容。
+
+## v0.1.3 前端优化候选版
+基于用户提供的 ui-refined 源码：窄容器仅显示未来的两人及以上重合区间，左右各补一格，合并相邻扩展区间，按实际宽度每行最多12格；恢复原版紫色渐变、错峰星星、流光、午夜标记。点击格子查看人数及成员，剩余完整时间轴折叠展开后同样分行。宽容器继续使用原版 DensityBar。快捷时段忽略已过去的时间；保存保留已过去的原日程，不覆盖其他设备并发修改。后端、签名和 API 入口不变。发布前运行完整 npm test:product、npm run build:product、npm run build:pwa 及签名发布工作流。

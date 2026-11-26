@@ -1,82 +1,756 @@
-import React,{useCallback,useEffect,useMemo,useRef,useState} from 'react';
-import {createRoot} from 'react-dom/client';
-import {App} from '@capacitor/app';
-import {Capacitor,registerPlugin} from '@capacitor/core';
-import {GameStickerArt,HeroSquadIllustration} from '../src/original/components/GameArtwork';
-import {AvatarDot,SeatRow} from '../src/original/components/AvatarChip';
-import {NightEditor} from '../src/original/components/NightEditor';
-import {recommend,mergeSpans} from '../src/original/domain/recommend';
-import {slotToShanghaiParts,formatSlotInNight,formatNightWeekday} from '../src/original/domain/time';
-import type {Answer,GameTag,Night,RoomSnapshot,Span} from '../src/original/domain/types';
-import ticket from '../src/original/components/RecommendationCard.module.css';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { createRoot } from 'react-dom/client';
+import { App } from '@capacitor/app';
+import { Capacitor, registerPlugin } from '@capacitor/core';
+import { Bell, Calendar, Home, RefreshCw, User } from 'lucide-react';
+import { AvatarDot } from '../src/original/components/AvatarChip';
+import { HeroSquadIllustration } from '../src/original/components/GameArtwork';
+import { mergeSpans, recommend } from '../src/original/domain/recommend';
+import {
+  formatNightWeekday,
+  formatSlotInNight,
+  slotToShanghaiParts,
+} from '../src/original/domain/time';
+import type { Answer, GameTag, Night, RoomSnapshot } from '../src/original/domain/types';
 import '../src/original/styles/tokens.css';
 import '../src/original/styles/global.css';
 import './product.css';
-import {PushSettings,ReservationPanel,WeeklyTemplate,VersionSettings} from './features';
-import {AccountPanel} from './account';
-import {isPwa,webAuth,fetchWithTimeout,apiEndpoint,InstallPanel,registerPwa,readLaunch} from './pwa/client';
+import { AccountPanel } from './account';
+import { HomeView } from './components/HomeView';
+import { MessagesView } from './components/MessagesView';
+import { ScheduleEditor } from './components/ScheduleEditor';
+import { PushSettings, ReservationPanel, VersionSettings, WeeklyTemplate } from './features';
+import {
+  InstallPanel,
+  fetchWithTimeout,
+  isPwa,
+  readLaunch,
+  registerPwa,
+} from './pwa/client';
+import {
+  ApiError,
+  apiRequest,
+  formatErrorMessage,
+  type Page,
+  type Snapshot,
+  type WriteFn,
+} from './types';
 
-type Member={id:string;nickname:string;schedule:Span[];schedule_revision:number;last_seen:number|null;template?:{day:number;from:number;to:number}[];overrideDays?:number[]};
-type Invite={id:string;creator:string;game:GameTag;title:string;created_at:number;expires_at:number;revision:number;r1:string;r2:string;r3:string;status:'pending'|'assembled'|'expired'};
-type Message={id:string;invite_id:string;kind:'invite'|'reply'|'assembled';actor:string;detail:string;created_at:number;read_at:number|null};
-type Reservation={id:string;creator:string;game:GameTag;title:string;from_slot:number;to_slot:number;state:'pending'|'confirmed'|'cancelled';r1:number;r2:number;r3:number;revision:number};
-type ReservationMessage={id:string;reservation_id:string;detail:string;created_at:number;read_at:number|null};
-type Nudge={id:string;invite_id:string;detail:string;created_at:number;status:string};
-type Snapshot={reservations:Reservation[];reservationMessages:ReservationMessage[];nudges:Nudge[];me:{id:string;nickname:string};members:Member[];invites:Invite[];messages:Message[];now:number};
-type Page='home'|'schedule'|'messages'|'me';
-const apiBase=isPwa?'':(import.meta.env.VITE_APP_API||'https://qidong.apexdaishi.xyz/app-api').replace(/\/$/,'');
-const SecureSession=registerPlugin<{get():Promise<{token?:string}>;set(input:{token:string}):Promise<void>;clear():Promise<void>}>('SecureSession');
-const labels:Record<string,string>={pending:'待回复',ready:'马上来','5':'等5分钟','10':'等10分钟','30':'等30分钟',no:'今天不玩'};
-const games:Record<GameTag,string>={apex:'Apex',gta:'GTA',tarkov:'塔科夫',custom:'自定义'};
-const reply=(inv:Invite,id:string)=>id==='m1'?inv.r1:id==='m2'?inv.r2:inv.r3;
-const stamp=(ms:number)=>new Date(ms).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false,month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'});
-class ApiError extends Error{constructor(public status:number,public code:string){super(code);}}
-async function api<T>(path:string,token:string|null,input?:object):Promise<T>{
- const res=await fetchWithTimeout(apiEndpoint(apiBase,path),{method:input?'POST':'GET',headers:{...webAuth(token),...(input?{'Content-Type':'application/json'}:{})},...(input?{body:JSON.stringify(input)}:{})});
- const data=await res.json();if(!res.ok)throw new ApiError(res.status,data.error||'request_failed');return data;
+const apiBase = isPwa
+  ? ''
+  : (import.meta.env.VITE_APP_API || 'https://qidong.apexdaishi.xyz/app-api').replace(/\/$/, '');
+
+const SecureSession = registerPlugin<{
+  get(): Promise<{ token?: string }>;
+  set(input: { token: string }): Promise<void>;
+  clear(): Promise<void>;
+}>('SecureSession');
+
+const NAV_TABS: { id: Page; label: string }[] = [
+  { id: 'home', label: '首页' },
+  { id: 'schedule', label: '日程' },
+  { id: 'messages', label: '消息' },
+  { id: 'me', label: '我的' },
+];
+
+function AppMain() {
+  const [token, setToken] = useState<string | null>(null);
+  const [bootRetry, setBootRetry] = useState(0);
+  const [bootFailed, setBootFailed] = useState(false);
+  const [initial, setInitial] = useState(true);
+  const [activation, setActivation] = useState('');
+  const [activationMember, setActivationMember] = useState('m1');
+  const [error, setError] = useState('');
+  const [snap, setSnap] = useState<Snapshot | null>(null);
+  const [page, setPage] = useState<Page>('home');
+  const [active, setActive] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [busyKey, setBusyKey] = useState<string | null>(null);
+  const [game, setGame] = useState<GameTag>('apex');
+  const [custom, setCustom] = useState('');
+  const [nickname, setNickname] = useState('');
+  const [nickNotice, setNickNotice] = useState('');
+  const [focusInvite, setFocusInvite] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<{ message: string; isConflict: boolean } | null>(null);
+
+  const requestSerial = useRef(0);
+  const session = useRef<string | null>(null);
+  const pending = useRef<{ key: string; id: string } | null>(null);
+  const actionLock = useRef(false);
+  const lastServerNickname = useRef<string>('');
+
+  useEffect(() => {
+    let gone = false;
+    (async () => {
+      try {
+        if (isPwa) {
+          const r = await fetchWithTimeout('/api/web/session', { cache: 'no-store' });
+          if (r.ok) {
+            if (!gone) {
+              session.current = 'web';
+              setToken('web');
+            }
+          } else if (r.status !== 401) {
+            throw Error('session_unavailable');
+          }
+        } else if (Capacitor.isNativePlatform()) {
+          const r = await SecureSession.get();
+          if (!gone && r.token) {
+            session.current = r.token;
+            setToken(r.token);
+          }
+        }
+      } catch {
+        if (!gone) {
+          setBootFailed(true);
+          setError(
+            isPwa ? '无法检查登录状态，请联网后重试。' : '安全存储无法读取，请联系管理员。',
+          );
+        }
+      } finally {
+        if (!gone) setInitial(false);
+      }
+    })();
+    return () => {
+      gone = true;
+    };
+  }, [bootRetry]);
+
+  const refresh = useCallback(async () => {
+    const t = session.current;
+    if (!t) return false;
+    const id = ++requestSerial.current;
+    try {
+      const data = await apiRequest<Snapshot>(apiBase, '/api/state', t);
+      if (id !== requestSerial.current || session.current !== t) return false;
+      setSnap(data);
+      setError('');
+      return true;
+    } catch (e) {
+      if (id !== requestSerial.current || session.current !== t) return false;
+      if (e instanceof ApiError && e.status === 401) {
+        session.current = null;
+        setToken(null);
+        setSnap(null);
+        setNickname('');
+        lastServerNickname.current = '';
+        if (!isPwa && Capacitor.isNativePlatform()) {
+          void SecureSession.clear().catch(() => {});
+        }
+        setError('登录状态已失效，请使用个人口令重新登录。');
+        return false;
+      }
+      setError(formatErrorMessage(e));
+      return false;
+    }
+  }, []);
+
+  const receive = useCallback(
+    (raw: string) => {
+      try {
+        const u = new URL(raw);
+        if (u.protocol === 'qidongapp:' && u.hostname === 'game' && !u.search && !u.hash) {
+          if (/^\/[0-9a-f-]{36}$/.test(u.pathname)) {
+            setFocusInvite(u.pathname.slice(1));
+            setPage('home');
+            void refresh();
+          } else if (['/schedule', '/messages', '/me'].includes(u.pathname)) {
+            setPage(u.pathname.slice(1) as Page);
+            void refresh();
+          }
+        }
+      } catch {
+        // Ignore invalid launch URLs
+      }
+    },
+    [refresh],
+  );
+
+  useEffect(() => {
+    const v = () => {
+      setActive(!document.hidden);
+      if (!document.hidden) void refresh();
+    };
+    document.addEventListener('visibilitychange', v);
+    v();
+
+    if (isPwa) {
+      const navigate = () => {
+        const link = readLaunch(window.location.href);
+        if (link.invite) {
+          setFocusInvite(link.invite);
+          setPage('home');
+        } else if (link.page) {
+          setPage(link.page);
+        }
+      };
+      navigate();
+      window.addEventListener('popstate', navigate);
+      window.addEventListener('online', v);
+      return () => {
+        document.removeEventListener('visibilitychange', v);
+        window.removeEventListener('popstate', navigate);
+        window.removeEventListener('online', v);
+      };
+    }
+
+    const a = App.addListener('appStateChange', (e) => {
+      setActive(e.isActive);
+      if (e.isActive) void refresh();
+    });
+    const b = App.addListener('appUrlOpen', (e) => receive(e.url));
+    App.getLaunchUrl()
+      .then((x) => {
+        if (x?.url) receive(x.url);
+      })
+      .catch(() => {});
+    return () => {
+      void a.then((x) => x.remove());
+      void b.then((x) => x.remove());
+      document.removeEventListener('visibilitychange', v);
+    };
+  }, [receive, refresh]);
+
+  const waiting = snap?.invites.some((i) => i.status === 'pending') ?? false;
+  useEffect(() => {
+    if (!token || !active) return;
+    void refresh();
+    const timer = setInterval(() => void refresh(), waiting ? 3000 : 6000);
+    return () => clearInterval(timer);
+  }, [token, active, waiting, refresh]);
+
+  // Sync nickname only when server nickname genuinely changes (allows user to clear input cleanly)
+  useEffect(() => {
+    const serverNick = snap?.me.nickname ?? '';
+    if (serverNick && serverNick !== lastServerNickname.current) {
+      lastServerNickname.current = serverNick;
+      setNickname(serverNick);
+    }
+  }, [snap?.me.nickname]);
+
+
+  // Reset scroll to top on tab switch (unless jumping to a specific invite card)
+  useEffect(() => {
+    if (!focusInvite) {
+      window.scrollTo({ top: 0, behavior: 'auto' });
+    }
+  }, [page, focusInvite]);
+
+  useEffect(() => {
+    if (focusInvite && page === 'home') {
+      const el = document.getElementById(`invite-${focusInvite}`);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        setFocusInvite(null);
+      }
+    }
+  }, [focusInvite, page, snap]);
+
+  async function activate(e: FormEvent) {
+    e.preventDefault();
+    if (actionLock.current || !activation.trim()) return;
+    actionLock.current = true;
+    setBusy(true);
+    setBusyKey('login');
+    setError('');
+    try {
+      const r = await apiRequest<{ token?: string }>(
+        apiBase,
+        isPwa ? '/api/web/login' : '/api/login',
+        null,
+        { password: activation.trim(), memberId: activationMember },
+      );
+      const next = isPwa ? 'web' : r.token;
+      if (!next) throw Error('no_session');
+      if (!isPwa && Capacitor.isNativePlatform()) {
+        await SecureSession.set({ token: next });
+      }
+      session.current = next;
+      setToken(next);
+      setActivation('');
+    } catch (err) {
+      setError(
+        err instanceof ApiError && err.code === 'invalid_login'
+          ? '身份或口令不正确；已激活的旧设备需先在「我的」设置长期口令。'
+          : formatErrorMessage(err),
+      );
+    } finally {
+      actionLock.current = false;
+      setBusy(false);
+      setBusyKey(null);
+    }
+  }
+
+  const write: WriteFn = useCallback(
+    async (path, input, versioned = false, actionKey) => {
+      if (actionLock.current || !session.current) return false;
+      actionLock.current = true;
+      setBusy(true);
+      setBusyKey(actionKey ?? path);
+      setError('');
+      const key = path + JSON.stringify(input);
+      if (!pending.current || pending.current.key !== key) {
+        pending.current = { key, id: crypto.randomUUID() };
+      }
+      try {
+        await apiRequest(apiBase, path, session.current, {
+          ...input,
+          ...(versioned ? { mutation: pending.current.id } : {}),
+        });
+        pending.current = null;
+        await refresh();
+        return true;
+      } catch (e) {
+        setError(formatErrorMessage(e));
+        if (e instanceof ApiError && e.status < 500) {
+          pending.current = null;
+          if (e.status === 409) {
+            if (path === '/api/schedule') setSaveError({message:'你的日程已在另一设备更新，请重新拉取。',isConflict:true});
+            await refresh();
+          }
+        }
+        return false;
+      } finally {
+        actionLock.current = false;
+        setBusy(false);
+        setBusyKey(null);
+      }
+    },
+    [refresh],
+  );
+
+  const scheduleSnap = useMemo<RoomSnapshot | null>(() => {
+    if (!snap) return null;
+    const first = Math.floor((snap.now + 2 * 3600000) / 86400000) * 48 - 4;
+    const nights: Night[] = Array.from({ length: 7 }, (_, i) => {
+      const from = first + i * 48;
+      const dateKey = slotToShanghaiParts(from).dateKey;
+      return { id: dateKey, dateKey, from, to: from + 48 };
+    });
+    return {
+      id: `fixed-schedule-${nights[0].id}`,
+      title: '未来七天空闲',
+      gameTag: game,
+      tzid: 'Asia/Shanghai',
+      nights,
+      targetPlayers: 3,
+      durationSlots: 2,
+      roomRevision: snap.members.reduce((n, m) => n + m.schedule_revision, 0),
+      closedAt: null,
+      submissions: snap.members.map((m) => {
+        const picks = m.schedule.flatMap((p) =>
+          nights
+            .map((n) => ({
+              nightId: n.id,
+              from: Math.max(p.from, n.from),
+              to: Math.min(p.to, n.to),
+            }))
+            .filter((p2) => p2.to > p2.from),
+        );
+        return {
+          memberId: m.id,
+          nickname: m.nickname,
+          answer: picks.length ? { kind: 'available', picks } : { kind: 'unavailable' },
+          updatedAt: new Date(snap.now).toISOString(),
+        };
+      }),
+      viewer: {
+        memberId: snap.me.id,
+        canClose: false,
+        mineRevision: snap.members.find((m) => m.id === snap.me.id)!.schedule_revision,
+      },
+      syncedAt: new Date(snap.now).toISOString(),
+    };
+  }, [snap, game]);
+
+  const candidates = useMemo(
+    () =>
+      scheduleSnap && snap
+        ? recommend({
+            nights: scheduleSnap.nights,
+            targetPlayers: 3,
+            durationSlots: 2,
+            earliestStart: Math.ceil(snap.now / 1800000),
+            submissions: scheduleSnap.submissions,
+          }).filter((x) => x.missingPlayers === 0)
+        : [],
+    [scheduleSnap, snap],
+  );
+
+  async function saveSchedule(answer: Answer, revision: number) {
+    if (!scheduleSnap) return false;
+    const picks = answer.kind === 'available' ? mergeSpans(answer.picks) : [];
+    if (revision !== scheduleSnap.viewer.mineRevision) {
+      setSaveError({
+        message: '你的时间已在其他设备更新，请先拉取最新日程再编辑。',
+        isConflict: true,
+      });
+      return false;
+    }
+    const ok = await write('/api/schedule', { picks, revision }, true, 'save-schedule');
+    setSaveError(current => ok ? null : current?.isConflict ? current : { message: '保存未确认，请检查顶部提示并重试。', isConflict: false });
+    return ok;
+  }
+
+  async function handleSaveNickname(e: FormEvent) {
+    e.preventDefault();
+    const trimmed = nickname.trim();
+    if (busy || !trimmed) return;
+    setNickNotice('');
+    const ok = await write('/api/profile', { nickname: trimmed }, false, 'save-nickname');
+    if (ok) setNickNotice('昵称已更新');
+  }
+
+  if (initial) {
+    return (
+      <main className="appShell">
+        <section className="paper emptyState">
+          <p className="emptyStateTitle">正在读取安全身份…</p>
+        </section>
+      </main>
+    );
+  }
+
+  if (bootFailed) {
+    return (
+      <main className="appShell">
+        <section className="paper">
+          <h1 className="brandTitle">启动！</h1>
+          <p role="alert" className="warning">
+            {error}
+          </p>
+          <button
+            type="button"
+            className="btnPrimary"
+            onClick={() => {
+              setBootFailed(false);
+              setInitial(true);
+              setBootRetry((n) => n + 1);
+            }}
+          >
+            重新连接
+          </button>
+        </section>
+      </main>
+    );
+  }
+
+  if (!token) {
+    return (
+      <main className="appShell">
+        <section className="paper loginCard">
+          <div className="loginHero">
+            <HeroSquadIllustration />
+            <div>
+              <h1 className="brandTitle">启动！</h1>
+              <p className="helperText">三人固定开黑小队</p>
+            </div>
+          </div>
+
+          <p className="helperText">
+            选择你的固定身份，输入个人登录口令。首次登录可使用管理员发放的原激活码。
+          </p>
+
+          <form className="stackForm" onSubmit={(e) => void activate(e)}>
+            <div className="activationMembers" role="group" aria-label="选择身份">
+              {[
+                ['m1', '成员一'],
+                ['m2', '成员二'],
+                ['m3', '成员三'],
+              ].map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  className={`memberSelectBtn ${activationMember === id ? 'isSelected' : ''}`}
+                  aria-pressed={activationMember === id}
+                  disabled={busy}
+                  onClick={() => {
+                    setActivationMember(id);
+                    setActivation('');
+                    setError('');
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            <div className="fieldGroup">
+              <label className="fieldLabel" htmlFor="activation-code">
+                个人登录口令
+              </label>
+              <input
+                id="activation-code"
+                className="fieldInput"
+                type="password"
+                autoComplete="current-password"
+                autoCapitalize="none"
+                spellCheck={false}
+                placeholder="输入个人口令或首次激活码"
+                value={activation}
+                onChange={(e) => setActivation(e.target.value)}
+              />
+            </div>
+
+            <button
+              type="submit"
+              className="btnPrimary btnFull"
+              disabled={busy || !activation.trim()}
+            >
+              {busyKey === 'login' ? '正在登录…' : '登录'}
+            </button>
+          </form>
+
+          <p className="helperText">
+            同一个身份可在多个设备登录。已激活的旧用户请先在「我的」设置长期口令。
+          </p>
+
+          {isPwa && <InstallPanel />}
+          {error && (
+            <p role="alert" className="warning">
+              {error}
+            </p>
+          )}
+        </section>
+      </main>
+    );
+  }
+
+  const unreadMessages = Boolean(
+    snap?.messages.some((m) => !m.read_at) || snap?.reservationMessages.some((m) => !m.read_at),
+  );
+
+  function renderNavIcon(id: Page) {
+    if (id === 'home') return <Home size={20} aria-hidden="true" />;
+    if (id === 'schedule') return <Calendar size={20} aria-hidden="true" />;
+    if (id === 'messages') return <Bell size={20} aria-hidden="true" />;
+    return <User size={20} aria-hidden="true" />;
+  }
+
+  return (
+    <main className="appShell">
+      <header className="appHeader">
+        <div className="appHeaderBrand">
+          <h1 className="brandTitleSm">启动！</h1>
+          <span className="headerPill">固定三人 · {snap?.me.nickname || '同步中'}</span>
+        </div>
+        <button
+          type="button"
+          className="btnIconGhost"
+          aria-label="刷新数据"
+          onClick={() => void refresh()}
+        >
+          <RefreshCw size={16} aria-hidden="true" />
+        </button>
+      </header>
+
+      {error && (
+        <div role="alert" className="warning warningRow">
+          <span>{error}</span>
+          <button type="button" className="btnGhostSm" onClick={() => void refresh()}>
+            重试
+          </button>
+        </div>
+      )}
+
+      {!snap ? (
+        <section className="paper emptyState">
+          <p className="emptyStateTitle">正在同步小队数据…</p>
+          <button type="button" className="btnSecondary" onClick={() => void refresh()}>
+            手动刷新
+          </button>
+        </section>
+      ) : (
+        <>
+          {page === 'home' && (
+            <HomeView
+              snap={snap}
+              game={game}
+              custom={custom}
+              busy={busy}
+              busyKey={busyKey}
+              onGameChange={setGame}
+              onCustomChange={setCustom}
+              write={write}
+            />
+          )}
+
+          {page === 'schedule' && scheduleSnap && (
+            <>
+              <section className="paper">
+                <div className="cardHeaderRow">
+                  <h2 className="sectionHeading">三人共同空闲</h2>
+                  <span className="badgeSoft">北京时间</span>
+                </div>
+                {candidates.length ? (
+                  <div className="commonSlotList">
+                    {candidates.slice(0, 5).map((c, i) => {
+                      const n = scheduleSnap.nights.find((x) => x.id === c.nightId)!;
+                      return (
+                        <div key={i} className="commonSlotChip tabular">
+                          <strong>{formatNightWeekday(n.dateKey)}</strong>
+                          <span>
+                            {formatSlotInNight(c.firstStart, n.dateKey)} –{' '}
+                            {formatSlotInNight(c.availableUntil, n.dateKey)}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="helperText">还没有三人连续至少 1 小时的共同空闲。</p>
+                )}
+                <p className="helperText">每日周期为 06:00 至次日 06:00。</p>
+              </section>
+
+              <ScheduleEditor
+                snapshot={scheduleSnap}
+                earliestStart={Math.ceil(snap.now / 1800000)}
+                isSaving={busy && busyKey === 'save-schedule'}
+                saveError={saveError}
+                onSave={saveSchedule}
+                onRefreshLatest={refresh}
+                onClearError={() => setSaveError(null)}
+              />
+
+              <WeeklyTemplate
+                key={snap.me.id}
+                member={snap.members.find((m) => m.id === snap.me.id)!}
+                now={snap.now}
+                busy={busy}
+                write={write}
+              />
+
+              <ReservationPanel
+                now={snap.now}
+                me={snap.me.id}
+                members={snap.members}
+                reservations={snap.reservations}
+                game={game}
+                custom={custom}
+                candidates={candidates}
+                busy={busy}
+                write={write}
+              />
+            </>
+          )}
+
+          {page === 'messages' && (
+            <MessagesView
+              snap={snap}
+              write={write}
+              onJumpInvite={(inviteId) => {
+                setFocusInvite(inviteId);
+                setPage('home');
+              }}
+              onJumpPage={(nextPage) => setPage(nextPage)}
+            />
+          )}
+
+          {page === 'me' && (
+            <>
+              <section className="paper">
+                <div className="profileHead">
+                  <AvatarDot name={snap.me.nickname} seed={snap.me.id} isMe />
+                  <div>
+                    <h2 className="sectionHeading">{snap.me.nickname}</h2>
+                    <p className="helperText">
+                      固定成员：{snap.me.id} · {isPwa ? '网页版（与 APK 共用数据）' : 'Android 客户端'}
+                    </p>
+                  </div>
+                </div>
+
+                <form className="stackForm" onSubmit={(e) => void handleSaveNickname(e)}>
+                  <div className="fieldGroup">
+                    <label className="fieldLabel" htmlFor="profile-nickname">
+                      显示昵称
+                    </label>
+                    <div className="inlineInputRow">
+                      <input
+                        id="profile-nickname"
+                        className="fieldInput"
+                        value={nickname}
+                        maxLength={24}
+                        placeholder="输入你的昵称"
+                        onChange={(e) => {
+                          setNickname(e.target.value);
+                          setNickNotice('');
+                        }}
+                      />
+                      <button
+                        type="submit"
+                        className="btnPrimary"
+                        disabled={busy || !nickname.trim() || nickname.trim() === snap.me.nickname}
+                      >
+                        {busyKey === 'save-nickname' ? '保存中…' : '保存'}
+                      </button>
+                    </div>
+                    {!nickname.trim() && <p className="fieldError">昵称不能为空。</p>}
+                    {nickNotice && (
+                      <p role="status" className="statusBanner">
+                        {nickNotice}
+                      </p>
+                    )}
+                  </div>
+                </form>
+              </section>
+
+              <AccountPanel
+                key={snap.me.id}
+                token={token}
+                apiBase={apiBase}
+                onSession={async (next) => {
+                  if (!isPwa && Capacitor.isNativePlatform()) {
+                    if (next) await SecureSession.set({ token: next });
+                    else await SecureSession.clear();
+                  }
+                  requestSerial.current++;
+                  session.current = next;
+                  setToken(next);
+                  if (!next) {
+                    setSnap(null);
+                    setNickname('');
+                    lastServerNickname.current = '';
+                    setPage('home');
+                    setError('');
+                  } else {
+                    void refresh();
+                  }
+                }}
+              />
+
+              <PushSettings token={token} apiBase={apiBase} />
+              {isPwa ? <InstallPanel /> : <VersionSettings token={token} apiBase={apiBase} />}
+            </>
+          )}
+        </>
+      )}
+
+      <nav className="bottomNav" aria-label="主导航">
+        {NAV_TABS.map((tab) => {
+          const isCurrent = page === tab.id;
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              className="bottomNavBtn"
+              aria-current={isCurrent ? 'page' : undefined}
+              onClick={() => setPage(tab.id)}
+            >
+              <span className="bottomNavIcon">
+                {renderNavIcon(tab.id)}
+                {tab.id === 'messages' && unreadMessages && (
+                  <span className="navBadgeDot" aria-label="有未读消息" />
+                )}
+              </span>
+              <span className="bottomNavLabel">{tab.label}</span>
+            </button>
+          );
+        })}
+      </nav>
+    </main>
+  );
 }
-function errorMessage(e:unknown){return e instanceof ApiError?e.status===409?'数据已更新或邀请已过期，请刷新后重试':e.status===401?'身份凭证无效，请联系管理员':e.status===429?'操作过于频繁，请稍后重试':e.code==='push_key_not_configured'?'通知加密密钥尚未配置，请联系管理员':e.status===400?'输入内容不符合要求':'服务端请求失败（'+e.status+'）':'网络连接失败，请重试';}
-function AppMain(){
- const [token,setToken]=useState<string|null>(null),[bootRetry,setBootRetry]=useState(0),[bootFailed,setBootFailed]=useState(false),[initial,setInitial]=useState(true),[activation,setActivation]=useState(''),[activationMember,setActivationMember]=useState('m1'),[error,setError]=useState(''),[snap,setSnap]=useState<Snapshot|null>(null),[page,setPage]=useState<Page>('home'),[active,setActive]=useState(true),[busy,setBusy]=useState(false),[game,setGame]=useState<GameTag>('apex'),[custom,setCustom]=useState(''),[nickname,setNickname]=useState(''),[focusInvite,setFocusInvite]=useState<string|null>(null),[saveError,setSaveError]=useState<{message:string;isConflict:boolean}|null>(null);
- const requestSerial=useRef(0),session=useRef<string|null>(null),pending=useRef<{key:string;id:string}|null>(null),actionLock=useRef(false),scheduleBase=useRef<number|null>(null);
- useEffect(()=>{let gone=false;(async()=>{try{if(isPwa){const r=await fetchWithTimeout('/api/web/session',{cache:'no-store'});if(r.ok){if(!gone){session.current='web';setToken('web');}}else if(r.status!==401)throw Error('session_unavailable');}else if(Capacitor.isNativePlatform()){const r=await SecureSession.get();if(!gone&&r.token){session.current=r.token;setToken(r.token);}}}catch{if(!gone){setBootFailed(true);setError(isPwa?'无法检查登录状态，请联网后重试。':'安全存储无法读取，请联系管理员。');}}finally{if(!gone)setInitial(false);}})();return()=>{gone=true;};},[bootRetry]);
- const refresh=useCallback(async()=>{const t=session.current;if(!t)return;const id=++requestSerial.current;try{const data=await api<Snapshot>('/api/state',t);if(id!==requestSerial.current||session.current!==t)return;setSnap(data);setError('');}catch(e){if(id!==requestSerial.current||session.current!==t)return;if(e instanceof ApiError&&e.status===401){session.current=null;setToken(null);setSnap(null);setNickname('');if(!isPwa&&Capacitor.isNativePlatform())void SecureSession.clear().catch(()=>{});setError('登录状态已失效，请使用个人口令重新登录。');return;}setError(errorMessage(e));}},[]);
- const receive=useCallback((raw:string)=>{try{const u=new URL(raw);if(u.protocol==='qidongapp:'&&u.hostname==='game'&&!u.search&&!u.hash){if(/^\/[0-9a-f-]{36}$/.test(u.pathname)){setFocusInvite(u.pathname.slice(1));setPage('home');void refresh();}else if(['/schedule','/messages','/me'].includes(u.pathname)){setPage(u.pathname.slice(1) as Page);void refresh();}}}catch{}},[refresh]);
- useEffect(()=>{const v=()=>{setActive(!document.hidden);if(!document.hidden)void refresh();};document.addEventListener('visibilitychange',v);v();if(isPwa){const navigate=()=>{const link=readLaunch(window.location.href);if(link.invite){setFocusInvite(link.invite);setPage('home');}else if(link.page)setPage(link.page);};navigate();window.addEventListener('popstate',navigate);window.addEventListener('online',v);return()=>{document.removeEventListener('visibilitychange',v);window.removeEventListener('popstate',navigate);window.removeEventListener('online',v);};}const a=App.addListener('appStateChange',e=>{setActive(e.isActive);if(e.isActive)void refresh();});const b=App.addListener('appUrlOpen',e=>receive(e.url));App.getLaunchUrl().then(x=>{if(x?.url)receive(x.url);}).catch(()=>{});return()=>{void a.then(x=>x.remove());void b.then(x=>x.remove());document.removeEventListener('visibilitychange',v);};},[receive,refresh]);
- const waiting=snap?.invites.some(i=>i.status==='pending')??false;
- useEffect(()=>{if(!token||!active)return;void refresh();const timer=setInterval(()=>void refresh(),waiting?3000:6000);return()=>clearInterval(timer);},[token,active,waiting,refresh]);
- useEffect(()=>{if(snap)setNickname(old=>old||snap.me.nickname);},[snap]);
- useEffect(()=>{if(page==='schedule'){scheduleBase.current=snap?.members.find(m=>m.id===snap.me.id)?.schedule_revision??null;}else{scheduleBase.current=null;}},[page]);
- useEffect(()=>{if(focusInvite&&page==='home')document.getElementById('invite-'+focusInvite)?.scrollIntoView({behavior:'smooth',block:'center'});},[focusInvite,page,snap]);
- async function activate(){
-  if(actionLock.current)return;actionLock.current=true;setBusy(true);setError('');
-  try{const r=await api<{token?:string}>(isPwa?'/api/web/login':'/api/login',null,{password:activation.trim(),memberId:activationMember});const next=isPwa?'web':r.token;if(!next)throw Error('no_session');if(!isPwa&&Capacitor.isNativePlatform())await SecureSession.set({token:next});session.current=next;setToken(next);setActivation('');}
-  catch(e){setError(e instanceof ApiError&&e.code==='invalid_login'?'身份或口令不正确；已激活的旧设备需先在「我的」设置长期口令。':errorMessage(e));}finally{actionLock.current=false;setBusy(false);}
- }
- async function write(path:string,input:object,versioned=false){
-  if(actionLock.current||!session.current)return false;actionLock.current=true;setBusy(true);setError('');
-  const key=path+JSON.stringify(input);if(!pending.current||pending.current.key!==key)pending.current={key,id:crypto.randomUUID()};
-  try{await api(path,session.current,{...input,...(versioned?{mutation:pending.current.id}:{})});pending.current=null;await refresh();return true;}
-  catch(e){setError(errorMessage(e));if(e instanceof ApiError&&e.status<500){pending.current=null;if(e.status===409)await refresh();}return false;}
-  finally{actionLock.current=false;setBusy(false);}
- }
- const scheduleSnap=useMemo<RoomSnapshot|null>(()=>{if(!snap)return null;const first=Math.floor((snap.now+2*3600000)/86400000)*48-4;const nights:Night[]=Array.from({length:7},(_,i)=>{const from=first+i*48;const dateKey=slotToShanghaiParts(from).dateKey;return {id:dateKey,dateKey,from,to:from+48};});return {id:'fixed-schedule-'+nights[0].id,title:'未来七天空闲',gameTag:game,tzid:'Asia/Shanghai',nights,targetPlayers:3,durationSlots:2,roomRevision:snap.members.reduce((n,m)=>n+m.schedule_revision,0),closedAt:null,submissions:snap.members.map(m=>{const picks=m.schedule.flatMap(p=>nights.map(n=>({nightId:n.id,from:Math.max(p.from,n.from),to:Math.min(p.to,n.to)})).filter(p=>p.to>p.from));return {memberId:m.id,nickname:m.nickname,answer:picks.length?{kind:'available',picks}:{kind:'unavailable'},updatedAt:new Date(snap.now).toISOString()};}),viewer:{memberId:snap.me.id,canClose:false,mineRevision:snap.members.find(m=>m.id===snap.me.id)!.schedule_revision},syncedAt:new Date(snap.now).toISOString()};},[snap,game]);
- const candidates=useMemo(()=>scheduleSnap&&snap?recommend({nights:scheduleSnap.nights,targetPlayers:3,durationSlots:2,earliestStart:Math.ceil(snap.now/1800000),submissions:scheduleSnap.submissions}).filter(x=>x.missingPlayers===0):[],[scheduleSnap,snap]);
- async function saveSchedule(_name:string,answer:Answer){if(!scheduleSnap)return false;const picks=answer.kind==='available'?mergeSpans(answer.picks):[];const revision=scheduleBase.current??scheduleSnap.viewer.mineRevision;if(revision!==scheduleSnap.viewer.mineRevision){setSaveError({message:'你的时间已在其他设备更新，请先刷新并重新编辑。',isConflict:true});return false;}const ok=await write('/api/schedule',{picks,revision},true);if(ok)scheduleBase.current=revision+1;setSaveError(ok?null:{message:'保存未确认，请检查顶部提示并刷新。',isConflict:false});return ok;}
- if(initial)return <main className="appShell"><p>正在读取安全身份…</p></main>;
- if(bootFailed)return <main className="appShell"><section className="paper"><h1>启动！</h1><p role="alert">{error}</p><button onClick={()=>{setBootFailed(false);setInitial(true);setBootRetry(n=>n+1);}}>重新连接</button></section></main>;
- if(!token)return <main className="appShell"><section className="paper"><HeroSquadIllustration/><h1>启动！</h1><p>选择你的固定身份，输入个人登录口令。首次登录可使用管理员已发放的原激活码。</p><div className="activationMembers" role="group" aria-label="选择身份">{[["m1","成员一"],["m2","成员二"],["m3","成员三"]].map(([id,label])=><button key={id} className={activationMember===id?"selected":undefined} aria-pressed={activationMember===id} disabled={busy} onClick={()=>{setActivationMember(id);setActivation("");setError("");}}>{label}</button>)}</div><label htmlFor="activation-code">个人登录口令</label><input id="activation-code" type="password" autoComplete="off" autoCapitalize="none" spellCheck={false} placeholder="输入个人口令" value={activation} onChange={e=>setActivation(e.target.value)}/><button className="primary" disabled={busy||!activation.trim()} onClick={activate}>登录</button><small>同一个身份可在多个设备登录。已经激活的旧用户请在「我的」设置长期口令。</small>{isPwa&&<InstallPanel/>}{error&&<p role="alert">{error}</p>}</section></main>;
- const tabs:Record<Page,string>={home:'首页',schedule:'日程',messages:'消息',me:'我的'};
- return <main className="appShell"><header className="appHeader"><h1>启动！</h1><span>固定三人 · {snap?.me.nickname||'同步中'}</span></header>
- {error&&<div role="alert" className="warning">{error} <button onClick={()=>void refresh()}>重试</button></div>}
- {!snap?<section className="paper"><p>等待真实后端同步，未使用模拟数据。</p><button onClick={()=>void refresh()}>刷新</button></section>:<>
- {page==='home'&&<><section className="paper hero"><HeroSquadIllustration/><div><h2>开黑小队</h2><p>随时叫上熟悉的伙伴！</p></div></section><section className="paper"><h2>三人状态</h2><div className="members">{snap.members.map(m=><div key={m.id}><AvatarDot name={m.nickname} seed={m.id} isMe={m.id===snap.me.id}/><strong>{m.nickname}</strong><small>{m.last_seen&&snap.now-m.last_seen<90000?'近期在线':'未近期活跃'}</small></div>)}</div></section><section className="paper"><h2>今晚玩什么？</h2><div className="gameGrid">{(Object.keys(games) as GameTag[]).map(g=><button key={g} className={game===g?'selected':''} onClick={()=>setGame(g)}><GameStickerArt game={g}/>{games[g]}</button>)}</div>{game==='custom'&&<input aria-label="游戏名称" value={custom} maxLength={32} onChange={e=>setCustom(e.target.value)}/>}<button className="primary" disabled={busy||(game==='custom'&&!custom.trim())} onClick={()=>void write('/api/invites',{game,title:custom},true)}>立即启动</button><small>邀请持久化至消息中心，已绑定 SPT 的队友将尝试接收服务端推送。</small></section>
- {snap.invites.length===0&&<p className="paper">还没有约局车票。</p>}{snap.invites.map(inv=><section id={'invite-'+inv.id} key={inv.id} className={ticket.ticket+' '+(inv.status==='assembled'?ticket.ticketReady:'')}><div className={ticket.ticketTop}><GameStickerArt game={inv.game}/><div className={ticket.ticketHeadInfo}><span className={inv.status==='assembled'?ticket.readyBadge:ticket.neutralBadge}>{inv.status==='assembled'?'集结成功':inv.status==='expired'?'已过期':'等待队友'}</span><h2 className={ticket.roomTitle}>{inv.title}</h2><p className={ticket.roomMeta}>{stamp(inv.created_at)} · 三人发车</p></div></div><div className={ticket.perforation}><span className={ticket.notchLeft}/><span className={ticket.dashedLine}/><span className={ticket.notchRight}/></div><div className={ticket.ticketBottom}><SeatRow targetPlayers={3} players={snap.members.filter(m=>reply(inv,m.id)==='ready').map(m=>({id:m.id,name:m.nickname,isMe:m.id===snap.me.id}))}/><div className="replyList">{snap.members.map(m=><p key={m.id}>{m.nickname} · {labels[reply(inv,m.id)]}</p>)}</div>{inv.status==='pending'&&<div className="replyButtons">{Object.keys(labels).filter(x=>x!=='pending').map(r=><button key={r} disabled={busy} className={reply(inv,snap.me.id)===r?'selected':''} onClick={()=>void write('/api/invites/'+inv.id+'/reply',{reply:r,revision:inv.revision},true)}>{labels[r]}</button>)}</div>}{inv.status==='pending'&&<div className="replyButtons">{snap.members.filter(m=>m.id!==snap.me.id&&!['ready','no'].includes(reply(inv,m.id))).map(m=><button key={m.id} disabled={busy} onClick={()=>void write('/api/invites/'+inv.id+'/nudge',{recipient:m.id},true)}>催促 {m.nickname}</button>)}</div>}<small>有效至 {stamp(inv.expires_at)}</small></div></section>)}</>}
- {page==='schedule'&&scheduleSnap&&<><section className="paper"><h2>三人共同空闲</h2>{candidates.length?candidates.slice(0,5).map((c,i)=>{const n=scheduleSnap.nights.find(x=>x.id===c.nightId)!;return <p key={i}>{formatNightWeekday(n.dateKey)} {formatSlotInNight(c.firstStart,n.dateKey)}–{formatSlotInNight(c.availableUntil,n.dateKey)}</p>;}):<p>还没有三人连续至少一小时的共同空闲。</p>}<small>北京时间，06:00 至次日 06:00 为一天。</small></section><NightEditor snapshot={scheduleSnap} earliestStart={Math.ceil(snap.now/1800000)} isSaving={busy} saveError={saveError} onSave={saveSchedule} onRefreshLatest={()=>{scheduleBase.current=scheduleSnap.viewer.mineRevision;void refresh();}} onClearError={()=>setSaveError(null)}/><WeeklyTemplate key={snap.me.id} member={snap.members.find(m=>m.id===snap.me.id)!} now={snap.now} busy={busy} write={write}/><ReservationPanel now={snap.now} me={snap.me.id} members={snap.members} reservations={snap.reservations} game={game} custom={custom} candidates={candidates} busy={busy} write={write}/></>}
- {page==='messages'&&<section className="paper"><h2>消息中心</h2>{!snap.messages.length&&!snap.reservationMessages.length&&!snap.nudges.length&&<p>暂时没有消息。</p>}{snap.reservationMessages.map(m=><button className="message" key={m.id} onClick={()=>{void write('/api/reservation-messages/read',{id:m.id});setPage('schedule');}}><strong>{m.read_at?'':'● '}{m.detail}</strong><small>{stamp(m.created_at)}</small></button>)}{snap.nudges.map(m=><button className="message" key={m.id} onClick={()=>{setFocusInvite(m.invite_id);setPage('home');}}><strong>{m.detail}</strong><small>{stamp(m.created_at)}</small></button>)}{snap.messages.map(m=><button className="message" key={m.id} onClick={()=>{void write('/api/messages/read',{id:m.id});setFocusInvite(m.invite_id);setPage('home');}}><strong>{m.read_at?'':'● '}{m.kind==='invite'?'开黑邀请':m.kind==='assembled'?'集结成功':'成员回复'}</strong><span>{snap.members.find(x=>x.id===m.actor)?.nickname||'队友'} · {m.kind==='reply'?labels[m.detail]:m.detail}</span><small>{stamp(m.created_at)}</small></button>)}</section>}
- {page==='me'&&<><section className="paper"><h2>我的身份</h2><AvatarDot name={snap.me.nickname} seed={snap.me.id} isMe/><p>固定成员：{snap.me.id}</p><input aria-label="昵称" value={nickname} maxLength={24} onChange={e=>setNickname(e.target.value)}/><button className="primary" disabled={busy} onClick={()=>void write('/api/profile',{nickname})}>保存昵称</button><small>{isPwa?'网页版 · 与 APK 共用数据':'正式开发版'}</small></section><AccountPanel key={snap.me.id} token={token} apiBase={apiBase} onSession={async(next)=>{if(!isPwa&&Capacitor.isNativePlatform()){if(next)await SecureSession.set({token:next});else await SecureSession.clear();}requestSerial.current++;session.current=next;setToken(next);if(!next){setSnap(null);setNickname('');setPage('home');setError('');}else void refresh();}}/><PushSettings token={token} apiBase={apiBase}/>{isPwa?<InstallPanel/>:<VersionSettings token={token} apiBase={apiBase}/>}</>}
- </>}
- <nav className="bottomNav" aria-label="主导航">{(Object.keys(tabs) as Page[]).map(x=><button key={x} aria-current={page===x?'page':undefined} onClick={()=>setPage(x)}>{tabs[x]}{x==='messages'&&(snap?.messages.some(m=>!m.read_at)||snap?.reservationMessages.some(m=>!m.read_at))?' ●':''}</button>)}</nav></main>;
-}
-createRoot(document.getElementById('root')!).render(<AppMain/>);
-if(isPwa)registerPwa();
+
+createRoot(document.getElementById('root')!).render(<AppMain />);
+if (isPwa) registerPwa();
