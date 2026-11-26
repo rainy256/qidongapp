@@ -1,4 +1,5 @@
 import {useEffect,useState} from 'react';
+import {webAuth,fetchWithTimeout} from './pwa/client';
 import type {GameTag,Candidate} from '../src/original/domain/types';
 type PushState={bound:boolean;keyConfigured:boolean;quietStart:number|null;quietEnd:number|null;test:{id:string;status:string}|null};
 const time=(n:number|null)=>n===null?'':String(Math.floor(n/60)).padStart(2,'0')+':'+String(n%60).padStart(2,'0');
@@ -6,7 +7,7 @@ const minute=(s:string)=>s?Number(s.slice(0,2))*60+Number(s.slice(3)):null;
 const statusLabels:Record<string,string>={queued:'已排队，尚未发送',sending:'发送中',accepted:'WxPusher 已受理，尚未确认手机收到',confirmed:'你已确认收到',unknown:'发送结果未知',rejected:'发送被拒绝',expired:'已过期',muted:'免打扰未发送',unbound:'未绑定'};
 export function PushSettings({token,apiBase}:{token:string;apiBase:string}){
  const [state,setState]=useState<PushState|null>(null),[spt,setSpt]=useState(''),[quietStart,setStart]=useState(''),[quietEnd,setEnd]=useState(''),[notice,setNotice]=useState(''),[busy,setBusy]=useState(false);
- async function request(path:string,body?:object){const res=await fetch(apiBase+path,{method:body?'POST':'GET',headers:{Authorization:'Bearer '+token,...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{}),signal:AbortSignal.timeout(12000)});const data=await res.json();if(!res.ok)throw Error(data.error||'request_failed');return data;}
+ async function request(path:string,body?:object){const res=await fetchWithTimeout(apiBase+path,{method:body?'POST':'GET',headers:{...webAuth(token),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});const data=await res.json();if(!res.ok)throw Error(data.error||'request_failed');return data;}
  async function load(){const s=await request('/api/push') as PushState;setState(s);return s;}
  useEffect(()=>{let alive=true;request('/api/push').then((s:PushState)=>{if(alive){setState(s);setStart(time(s.quietStart));setEnd(time(s.quietEnd));}}).catch(()=>{if(alive)setNotice('读取推送设置失败');});return()=>{alive=false;};},[token,apiBase]);
  useEffect(()=>{if(!state?.test||!['queued','sending'].includes(state.test.status))return;const t=setInterval(()=>{if(!document.hidden)void load().catch(()=>{});},3000);return()=>clearInterval(t);},[state?.test?.status,token,apiBase]);
