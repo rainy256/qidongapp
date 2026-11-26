@@ -1,0 +1,3 @@
+import {test} from 'node:test';import assert from 'node:assert/strict';import {quietNow,WxPusherProvider} from '../worker/push.mjs';
+test('quiet period crosses midnight',()=>{assert.equal(quietNow(1320,480,Date.parse('2026-11-26T23:00:00+08:00')),true);assert.equal(quietNow(1320,480,Date.parse('2026-11-26T12:00:00+08:00')),false);});
+test('provider accepted is not delivered; 429 retries; network unknown',async()=>{const a=new WxPusherProvider(async()=>Response.json({code:1000}));assert.equal((await a.send('SPT_example','hi')).status,'accepted');assert.equal((await new WxPusherProvider(async()=>new Response('',{status:429})).send('x','hi')).status,'retry');assert.equal((await new WxPusherProvider(async()=>{throw Error('network')}).send('x','hi')).status,'unknown');});
