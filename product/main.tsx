@@ -28,6 +28,7 @@ import {
   formatErrorMessage,
   type Page,
   type Snapshot,
+  type ReservationDraft,
   type WriteFn,
 } from './types';
 
@@ -68,6 +69,7 @@ function AppMain() {
   const [inviteNotice, setInviteNotice] = useState('');
   const launchSequence = useRef(0);
   const [focusReservation, setFocusReservation] = useState<string | null>(null);
+  const [reservationDraft, setReservationDraft] = useState<ReservationDraft | null>(null);
   const [reservationNotice, setReservationNotice] = useState('');
   const [saveError, setSaveError] = useState<{ message: string; isConflict: boolean } | null>(null);
 
@@ -112,7 +114,7 @@ function AppMain() {
     try {
       const data = await apiRequest<Snapshot>(apiBase, '/api/state', t);
       if (id !== requestSerial.current || session.current !== t) return false;
-      setSnap(data);
+      setSnap({...data, clientClock: performance.now()});
       setError('');
       return true;
     } catch (e) {
@@ -290,12 +292,20 @@ function AppMain() {
       if (!pending.current || pending.current.key !== key) {
         pending.current = { key, id: crypto.randomUUID() };
       }
+      const writeSession = session.current;
+      const generation = requestSerial.current;
       try {
-        await apiRequest(apiBase, path, session.current, {
+        const result = await apiRequest<{available_until?: number | null; availability_revision?: number; now?: number}>(apiBase, path, writeSession, {
           ...input,
           ...(versioned ? { mutation: pending.current.id } : {}),
         });
         pending.current = null;
+        if (generation !== requestSerial.current || writeSession !== session.current) return false;
+        // Only update availability from an acknowledged server response. This also
+        // survives a failed subsequent state refresh.
+        if (path === '/api/availability' && typeof result.availability_revision === 'number' && typeof result.now === 'number') {
+          setSnap(old => old ? {...old, members: old.members.map(m => m.id === old.me.id && (m.availability_revision ?? 0) <= result.availability_revision! ? {...m, available_until: result.available_until ?? null, availability_revision: result.availability_revision} : m)} : old);
+        }
         await refresh(true);
         return true;
       } catch (e) {
@@ -305,6 +315,7 @@ function AppMain() {
           if (e.status === 409) {
             if (path === '/api/schedule') setSaveError({message:'你的日程已在另一设备更新，请重新拉取。',isConflict:true});
             await refresh(true);
+            setError(formatErrorMessage(e));
           }
         }
         return false;
@@ -376,6 +387,11 @@ function AppMain() {
         : [],
     [scheduleSnap, snap],
   );
+
+  useEffect(() => {
+    if (page !== 'schedule' || !reservationDraft) return;
+    document.getElementById('reservation-form')?.scrollIntoView({behavior:'smooth',block:'start'});
+  }, [page, reservationDraft]);
 
   async function saveSchedule(answer: Answer, revision: number, unavailable: boolean) {
     if (!scheduleSnap) return false;
@@ -572,6 +588,13 @@ function AppMain() {
               busyKey={busyKey}
               onGameChange={setGame}
               onCustomChange={setCustom}
+              candidates={candidates}
+              onRebook={(draft) => {
+                setReservationDraft(draft);
+                setFocusReservation(null);
+                setReservationNotice('');
+                setPage('schedule');
+              }}
               write={write}
             />
           )}
@@ -604,7 +627,7 @@ function AppMain() {
                 <div className="memberConfirmRow" aria-label="成员日程状态">
                   {snap.members.map((m) => {
                     const available = m.schedule.some((p) => p.to > Math.ceil(snap.now / 1800000));
-                    const label = available ? '已填空闲' : m.scheduleStatus === 'unavailable' ? '已确认没空' : '未确认空闲';
+                    const label = available ? '已填空闲' : m.scheduleStatus === 'unavailable' ? '已确认没空' : '未填写';
                     return <span key={m.id} className={`confirmPill ${available ? 'isConfirmed' : ''}`}>{m.nickname} · {label}</span>;
                   })}
                 </div>
@@ -631,6 +654,8 @@ function AppMain() {
               />
 
               <ReservationPanel
+                draft={reservationDraft}
+                onDraftConsumed={() => setReservationDraft(null)}
                 now={snap.now}
                 me={snap.me.id}
                 members={snap.members}
