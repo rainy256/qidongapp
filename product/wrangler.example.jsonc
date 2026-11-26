@@ -1,1 +1,20 @@
-{"name":"qidongapp","main":"worker/index.mjs","compatibility_date":"2026-11-24","workers_dev":true,"preview_urls":false,"d1_databases":[{"binding":"DB","database_name":"qidongapp-db","database_id":"REPLACE_WITH_QIDONGAPP_DB_ID","migrations_dir":"worker/migrations"}]}
+{
+  "name": "qidongapp",
+  "main": "worker/index.mjs",
+  "compatibility_date": "2026-11-24",
+  "workers_dev": true,
+  "preview_urls": false,
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "qidongapp-db",
+      "database_id": "REPLACE_WITH_QIDONGAPP_DB_ID",
+      "migrations_dir": "worker/migrations"
+    }
+  ],
+  "triggers": {
+    "crons": [
+      "* * * * *"
+    ]
+  }
+}
