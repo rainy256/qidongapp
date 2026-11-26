@@ -16,6 +16,13 @@ export type Member = {
   overrideDays?: number[];
 };
 
+export type SavedSchedule = Pick<Member, 'schedule' | 'schedule_revision' | 'scheduleStatus' | 'template' | 'overrideDays'>;
+
+export function scheduleFields(member: SavedSchedule): SavedSchedule {
+  const {schedule, schedule_revision, scheduleStatus, template, overrideDays} = member;
+  return {schedule, schedule_revision, scheduleStatus, template, overrideDays};
+}
+
 export type Invite = {
   id: string;
   creator: string;
@@ -162,19 +169,20 @@ export async function apiRequest<T>(
   token: string | null,
   input?: object,
 ): Promise<T> {
-  const res = await fetchWithTimeout(apiEndpoint(apiBase, path), {
+  return fetchWithTimeout(apiEndpoint(apiBase, path), {
     method: input ? 'POST' : 'GET',
     headers: {
       ...bearerAuth(token),
       ...(input ? { 'Content-Type': 'application/json' } : {}),
     },
     ...(input ? { body: JSON.stringify(input) } : {}),
+  }, async res => {
+    if (!res.ok) {
+      const data = await res.json().catch(() => null);
+      throw new ApiError(res.status, data?.error || 'request_failed');
+    }
+    return await res.json() as T;
   });
-  const data = await res.json();
-  if (!res.ok) {
-    throw new ApiError(res.status, data.error || 'request_failed');
-  }
-  return data as T;
 }
 
 export function formatErrorMessage(e: unknown): string {
@@ -187,5 +195,7 @@ export function formatErrorMessage(e: unknown): string {
     if (e.status === 400) return '输入内容不符合要求';
     return `服务端请求失败（${e.status}）`;
   }
-  return '网络连接失败，请重试';
+  if (e instanceof Error && e.name === 'AbortError') return '等待服务器响应超时';
+  if (e instanceof SyntaxError) return '服务器响应格式异常';
+  return '无法连接到服务器，请重试';
 }

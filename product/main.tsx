@@ -28,6 +28,8 @@ import {
   formatErrorMessage,
   type Page,
   type Snapshot,
+  scheduleFields,
+  type SavedSchedule,
   type ReservationDraft,
   type WriteFn,
 } from './types';
@@ -77,6 +79,7 @@ function AppMain() {
   const refreshGate = useRef(createRefreshGate());
   const session = useRef<string | null>(null);
   const pending = useRef<{ key: string; id: string } | null>(null);
+  const pendingSchedule = useRef<{ key: string; id: string } | null>(null);
   const actionLock = useRef(false);
   const lastServerNickname = useRef<string>('');
 
@@ -115,13 +118,14 @@ function AppMain() {
       const data = await apiRequest<Snapshot>(apiBase, '/api/state', t);
       if (id !== requestSerial.current || session.current !== t) return false;
       setSnap(old => {
-        // An in-flight read may have started before an acknowledged write.
-        // Keep the newer per-member availability revision until a fresh read.
         const members = data.members.map(m => {
-          const previous = old?.members.find(x => x.id === m.id);
-          return old?.me.id === data.me.id && previous && (previous.availability_revision ?? 0) > (m.availability_revision ?? 0)
-            ? {...m, available_until:previous.available_until, availability_revision:previous.availability_revision}
-            : m;
+          const previous = old?.me.id === data.me.id && old.members.find(x => x.id === m.id);
+          if (!previous) return m;
+          if (previous.schedule_revision > m.schedule_revision) m = {...m, ...scheduleFields(previous)};
+          if ((previous.availability_revision ?? 0) > (m.availability_revision ?? 0)) {
+            m = {...m, available_until: previous.available_until, availability_revision: previous.availability_revision};
+          }
+          return m;
         });
         return {...data, members, clientClock: performance.now()};
       });
@@ -142,7 +146,7 @@ function AppMain() {
         setError('登录状态已失效，请使用个人口令重新登录。');
         return false;
       }
-      setError(formatErrorMessage(e));
+      setError('小队数据暂未刷新，稍后会自动重试。' + formatErrorMessage(e));
       return false;
     }
     }, afterCurrent);
@@ -298,19 +302,30 @@ function AppMain() {
       setBusy(true);
       setBusyKey(actionKey ?? path);
       setError('');
-      const key = path + JSON.stringify(input);
-      if (!pending.current || pending.current.key !== key) {
-        pending.current = { key, id: crypto.randomUUID() };
+      const scheduleWrite = path === '/api/schedule';
+      const attempt = scheduleWrite ? pendingSchedule : pending;
+      const key = requestSerial.current + path + JSON.stringify(input);
+      if (!attempt.current || attempt.current.key !== key) {
+        attempt.current = { key, id: crypto.randomUUID() };
       }
       const writeSession = session.current;
       const generation = requestSerial.current;
       try {
-        const result = await apiRequest<{available_until?: number | null; availability_revision?: number; now?: number}>(apiBase, path, writeSession, {
+        const result = await apiRequest<Partial<SavedSchedule> & {available_until?: number | null; availability_revision?: number; now?: number}>(apiBase, path, writeSession, {
           ...input,
-          ...(versioned ? { mutation: pending.current.id } : {}),
+          ...(versioned ? { mutation: attempt.current.id } : {}),
         });
-        pending.current = null;
+        attempt.current = null;
         if (generation !== requestSerial.current || writeSession !== session.current) return false;
+        if (scheduleWrite && Array.isArray(result.schedule) && typeof result.schedule_revision === 'number') {
+          const saved = scheduleFields({...result, schedule: result.schedule, schedule_revision: result.schedule_revision});
+          setSnap(old => old ? {...old, members: old.members.map(m =>
+            m.id === old.me.id && m.schedule_revision <= saved.schedule_revision ? {...m, ...saved} : m
+          )} : old);
+          setSaveError(null);
+          setError('');
+          return true;
+        }
         // Only update availability from an acknowledged server response. This also
         // survives a failed subsequent state refresh.
         if (path === '/api/availability' && typeof result.availability_revision === 'number' && typeof result.now === 'number') {
@@ -319,11 +334,23 @@ function AppMain() {
         await refresh(true);
         return true;
       } catch (e) {
+        if (generation !== requestSerial.current || writeSession !== session.current) return false;
+        if (scheduleWrite) {
+          const rejected = e instanceof ApiError && e.status < 500 && e.status !== 408;
+          const conflict = e instanceof ApiError && e.status === 409;
+          const detail = formatErrorMessage(e);
+          const message = rejected ? detail + '。本次修改未保存。' : detail + '。尚未收到保存确认，可再次点保存。';
+          setSaveError({
+            message: conflict ? '日程已在另一设备更新，请拉取最新日程。' : message + '草稿已保留。',
+            isConflict: conflict,
+          });
+          if (rejected) attempt.current = null;
+          return false;
+        }
         setError(formatErrorMessage(e));
         if (e instanceof ApiError && e.status < 500) {
-          pending.current = null;
+          attempt.current = null;
           if (e.status === 409) {
-            if (path === '/api/schedule') setSaveError({message:'你的日程已在另一设备更新，请重新拉取。',isConflict:true});
             await refresh(true);
             setError(formatErrorMessage(e));
           }
@@ -405,17 +432,13 @@ function AppMain() {
 
   async function saveSchedule(answer: Answer, revision: number, unavailable: boolean) {
     if (!scheduleSnap) return false;
-    const picks = answer.kind === 'available' ? mergeSpans(answer.picks) : [];
-    if (revision !== scheduleSnap.viewer.mineRevision) {
-      setSaveError({
-        message: '你的时间已在其他设备更新，请先拉取最新日程再编辑。',
-        isConflict: true,
-      });
+    if (actionLock.current) {
+      setSaveError({message: '另一项操作正在提交，请稍后再保存。草稿已保留。', isConflict: false});
       return false;
     }
-    const ok = await write('/api/schedule', { picks, revision, unavailable }, true, 'save-schedule');
-    setSaveError(current => ok ? null : current?.isConflict ? current : { message: '保存未确认，请检查顶部提示并重试。', isConflict: false });
-    return ok;
+    const picks = answer.kind === 'available' ? mergeSpans(answer.picks) : [];
+    // The server checks the draft revision and recognizes a retry whose first reply was lost.
+    return write('/api/schedule', { picks, revision, unavailable }, true, 'save-schedule');
   }
 
   async function handleSaveNickname(e: FormEvent) {

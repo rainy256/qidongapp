@@ -20,6 +20,15 @@ export function scheduleStatus(row,now,schedule=effectiveSchedule(row,now)){
  const start=dayStart(now),days=new Set(JSON.parse(row.override_days_json||'[]'));
  return Array.from({length:7},(_,i)=>start+i*48).every(day=>days.has(day))?'unavailable':'unanswered';
 }
+export function scheduleView(row, now, includeOwnSettings) {
+ const schedule = effectiveSchedule(row, now);
+ const view = {schedule_revision: row.schedule_revision, schedule, scheduleStatus: scheduleStatus(row, now, schedule)};
+ if (includeOwnSettings) {
+  view.template = JSON.parse(row.template_json || '[]');
+  view.overrideDays = JSON.parse(row.override_days_json || '[]');
+ }
+ return view;
+}
 export function updateOverrides(row,picks,now,markUnavailable=false){
  const target=normalizeSchedule(picks,now),before=effectiveSchedule(row,now),start=dayStart(now),days=new Set(JSON.parse(row.override_days_json||'[]').filter(x=>x>=start&&x<start+336)),stored=JSON.parse(row.schedule_json||'[]');
  let out=[];for(let i=0;i<7;i++){const day=start+i*48,a=clip(before,day,day+48),b=clip(target,day,day+48);

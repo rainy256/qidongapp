@@ -51,7 +51,15 @@ test('three-member activation, authenticated state, invitations, outbox, reserva
   const day=dayStart(Date.now()),dow=new Date(day*1800000+28800000).getUTCDay();
   assert.equal((await req('/api/schedule/template','m1',{revision:0,mutation:mut(),template:[{day:dow,from:20,to:24}]})).status,200);
   let s=await req('/api/state','m1');assert.deepEqual(s.data.members[0].schedule,[{from:day+20,to:day+24}]);assert.equal(s.data.members[1].template,undefined);assert.equal(s.data.members[1].scheduleStatus,'unanswered');
-  assert.equal((await req('/api/schedule','m1',{revision:1,mutation:mut(),picks:[],unavailable:true})).status,200);
+  const saveInput = {revision:1,mutation:mut(),picks:[],unavailable:true};
+  const saved = await req('/api/schedule','m1',saveInput);
+  assert.equal(saved.status,200);
+  assert.equal(saved.data.schedule_revision,2);
+  assert.equal(saved.data.scheduleStatus,'unavailable');
+  assert.deepEqual(saved.data.schedule,[]);
+  assert.equal(saved.data.overrideDays.length,7);
+  assert.deepEqual((await req('/api/schedule','m1',saveInput)).data,saved.data);
+  assert.equal((await req('/api/schedule','m1',{...saveInput,mutation:mut()})).status,409);
   s=await req('/api/state','m1');assert.deepEqual(s.data.members[0].schedule,[]);assert.equal(s.data.members[0].scheduleStatus,'unavailable');
   assert.equal((await req('/api/schedule/reset-day','m1',{revision:2,mutation:mut(),day})).status,200);
   s=await req('/api/state','m1');assert.deepEqual(s.data.members[0].schedule,[{from:day+20,to:day+24}]);

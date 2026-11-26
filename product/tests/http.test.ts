@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { apiRequest } from '../types';
 import { apiEndpoint, bearerAuth, fetchWithTimeout } from '../http';
 
 afterEach(() => {
@@ -36,5 +37,25 @@ describe('APK HTTP transport', () => {
     await vi.advanceTimersByTimeAsync(12000);
     await rejection;
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('keeps the timeout active until the save confirmation body arrives', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => ({
+      ok: true,
+      json: () => new Promise((_resolve, reject) =>
+        init.signal!.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')))),
+    }));
+    const result = expect(apiRequest('https://example.test', '/api/schedule', 'session', {}))
+      .rejects.toMatchObject({name: 'AbortError'});
+    await vi.advanceTimersByTimeAsync(12000);
+    await result;
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('preserves an upstream HTTP error even when the body is HTML', async () => {
+    vi.stubGlobal('fetch', async () => new Response('<html>Unavailable</html>', {status: 503}));
+    await expect(apiRequest('https://example.test', '/api/schedule', 'session', {}))
+      .rejects.toMatchObject({status: 503});
   });
 });

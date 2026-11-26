@@ -4,11 +4,14 @@ export function bearerAuth(token: string | null): Record<string, string> {
 export function apiEndpoint(base: string, path: string) {
   return base.endsWith('/app-api') && path.startsWith('/api/') ? base + path.slice(4) : base + path;
 }
-export async function fetchWithTimeout(url: string, init: RequestInit = {}) {
+export function fetchWithTimeout(url: string, init?: RequestInit): Promise<Response>;
+export function fetchWithTimeout<T>(url: string, init: RequestInit, read: (res: Response) => Promise<T>): Promise<T>;
+export async function fetchWithTimeout<T>(url: string, init: RequestInit = {}, read?: (res: Response) => Promise<T>) {
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), 12000);
   try {
-    return await fetch(url, { ...init, credentials: 'omit', cache: 'no-store', signal: ctl.signal });
+    const res = await fetch(url, { ...init, credentials: 'omit', cache: 'no-store', signal: ctl.signal });
+    return read ? await read(res) : res;
   } finally {
     clearTimeout(timer);
   }

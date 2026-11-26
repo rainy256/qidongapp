@@ -3,11 +3,11 @@ import {authenticate,login,account,allowAttempt} from './auth.mjs';
 import {MEMBER_IDS,REPLIES,GAMES,normalizeSchedule,replyColumn,mutationValid,secretValid,digest,newToken,inviteView} from './logic.mjs';
 import {latestVersion} from './version.mjs';
 import {encryptSpt,validSpt} from './spt.mjs';
-import {effectiveSchedule,scheduleStatus,normalizeTemplate,updateOverrides,ownSchedule,writeWeekly} from './weekly.mjs';
+import {scheduleView,normalizeTemplate,updateOverrides,ownSchedule,writeWeekly} from './weekly.mjs';
 import {drainPush} from './push.mjs';
 import {reservationApi} from './reservations.mjs';
 import {availabilityApi} from './availability.mjs';
-const HEADERS={'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','Access-Control-Allow-Origin':'https://localhost','Access-Control-Allow-Headers':'Authorization, Content-Type','Access-Control-Allow-Methods':'GET, POST, OPTIONS','Vary':'Origin'};
+const HEADERS={'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','Access-Control-Allow-Origin':'https://localhost','Access-Control-Allow-Headers':'Authorization, Content-Type','Access-Control-Allow-Methods':'GET, POST, OPTIONS','Access-Control-Max-Age':'600','Vary':'Origin'};
 const json=(value,status=200)=>new Response(JSON.stringify(value),{status,headers:HEADERS});
 const publicInvite='id,creator,game,title,created_at,expires_at,revision,r1,r2,r3,r1_eta,r2_eta,r3_eta';
 async function body(req){try{const s=await req.text();if(s.length>20000)return null;return JSON.parse(s);}catch{return null;}}
@@ -45,7 +45,7 @@ export default {async fetch(req,env,ctx){
     env.DB.prepare('SELECT '+publicInvite+' FROM app_invites WHERE expires_at>? ORDER BY created_at DESC LIMIT 20').bind(now-86400000),
     env.DB.prepare('SELECT id,invite_id,kind,actor,detail,created_at,read_at FROM app_messages WHERE member_id=? ORDER BY created_at DESC LIMIT 100').bind(me.id)
    ]);
-   const extra=await env.DB.batch([env.DB.prepare('SELECT id,creator,game,title,from_slot,to_slot,state,r1,r2,r3,revision FROM app_reservations WHERE to_slot*1800000>? ORDER BY from_slot LIMIT 50').bind(now-86400000),env.DB.prepare('SELECT id,reservation_id,kind,detail,created_at,read_at FROM app_reservation_events WHERE member_id=? ORDER BY created_at DESC LIMIT 100').bind(me.id),env.DB.prepare("SELECT id,invite_id,kind,content AS detail,created_at,status FROM app_push_jobs WHERE member_id=? AND kind='nudge' ORDER BY created_at DESC LIMIT 50").bind(me.id)]);return json({features:{rebook:env.ENABLE_REBOOKING==='true'},reservations:extra[0].results,reservationMessages:extra[1].results,nudges:extra[2].results,me,members:r[1].results.map(x=>({id:x.id,nickname:x.nickname,schedule_revision:x.schedule_revision,last_seen:x.last_seen,available_until:x.available_until>now?x.available_until:null,availability_revision:x.availability_revision,schedule:effectiveSchedule(x,now),scheduleStatus:scheduleStatus(x,now),...(x.id===me.id?{template:JSON.parse(x.template_json||'[]'),overrideDays:JSON.parse(x.override_days_json||'[]')}:{} )})),invites:r[2].results.map(x=>inviteView(x,now)),messages:r[3].results,now});
+   const extra=await env.DB.batch([env.DB.prepare('SELECT id,creator,game,title,from_slot,to_slot,state,r1,r2,r3,revision FROM app_reservations WHERE to_slot*1800000>? ORDER BY from_slot LIMIT 50').bind(now-86400000),env.DB.prepare('SELECT id,reservation_id,kind,detail,created_at,read_at FROM app_reservation_events WHERE member_id=? ORDER BY created_at DESC LIMIT 100').bind(me.id),env.DB.prepare("SELECT id,invite_id,kind,content AS detail,created_at,status FROM app_push_jobs WHERE member_id=? AND kind='nudge' ORDER BY created_at DESC LIMIT 50").bind(me.id)]);return json({features:{rebook:env.ENABLE_REBOOKING==='true'},reservations:extra[0].results,reservationMessages:extra[1].results,nudges:extra[2].results,me,members:r[1].results.map(x=>({id:x.id,nickname:x.nickname,last_seen:x.last_seen,available_until:x.available_until>now?x.available_until:null,availability_revision:x.availability_revision,...scheduleView(x,now,x.id===me.id)})),invites:r[2].results.map(x=>inviteView(x,now)),messages:r[3].results,now});
   }
   if(req.method!=='POST')return json({error:'not_found'},404);
   const b=await body(req);if(!b||typeof b!=='object')return json({error:'invalid_body'},400);
@@ -108,7 +108,7 @@ export default {async fetch(req,env,ctx){
   if(['/api/schedule','/api/schedule/template','/api/schedule/reset-day'].includes(path)){
    if(!mutationValid(b.mutation)||!Number.isSafeInteger(b.revision))return json({error:'invalid_schedule'},400);
    const current=await ownSchedule(env,me.id);
-   if(current.schedule_mutation===b.mutation)return json({schedule_revision:current.schedule_revision});
+   if(current.schedule_mutation===b.mutation)return json(scheduleView(current,now,true));
    if(current.schedule_revision!==b.revision)return json({error:'revision_conflict'},409);
    let template=JSON.parse(current.template_json||'[]'),days=JSON.parse(current.override_days_json||'[]'),picks=JSON.parse(current.schedule_json||'[]');
    try{
@@ -125,8 +125,11 @@ export default {async fetch(req,env,ctx){
     }
    }catch{return json({error:'invalid_schedule'},400);}
    const saved=await writeWeekly(env,me.id,b.revision,b.mutation,template,days,picks);
-   if(saved)return json(saved);
-   const latest=await ownSchedule(env,me.id);return latest.schedule_mutation===b.mutation?json({schedule_revision:latest.schedule_revision}):json({error:'revision_conflict'},409);
+   if(saved) return json(scheduleView({
+    schedule_revision:saved.schedule_revision, schedule_json:JSON.stringify(picks),
+    template_json:JSON.stringify(template), override_days_json:JSON.stringify(days)
+   },now,true));
+   const latest=await ownSchedule(env,me.id);return latest.schedule_mutation===b.mutation?json(scheduleView(latest,now,true)):json({error:'revision_conflict'},409);
   }
   if(path==='/api/messages/read'){
    if(typeof b.id!=='string'||b.id.length>180)return json({error:'invalid_message'},400);
