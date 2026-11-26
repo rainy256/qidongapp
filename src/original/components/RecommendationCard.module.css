@@ -1,0 +1,281 @@
+.ticket {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--radius-card);
+  border: 1.5px solid var(--border-hairline);
+  background-color: var(--bg-surface);
+  box-shadow: var(--card-shadow);
+  overflow: hidden;
+}
+
+.ticketReady {
+  border-color: var(--brand-soft-border);
+}
+
+.ticketReady .ticketTop {
+  background-image: linear-gradient(135deg, rgb(238 235 255 / 0.88), rgb(255 245 242 / 0.72));
+}
+
+.ticketAlmost {
+  border-color: var(--amber-border);
+}
+
+.ticketAlmost .ticketTop {
+  background-image: linear-gradient(135deg, rgb(255 246 218 / 0.88), rgb(255 239 246 / 0.62));
+}
+
+@media (prefers-color-scheme: dark) {
+  .ticketReady .ticketTop {
+    background-image: linear-gradient(135deg, rgb(55 48 92 / 0.82), rgb(64 40 58 / 0.56));
+  }
+
+  .ticketAlmost .ticketTop {
+    background-image: linear-gradient(135deg, rgb(64 49 26 / 0.78), rgb(62 39 54 / 0.58));
+  }
+}
+
+.ticketTop {
+  display: flex;
+  align-items: center;
+  gap: 0.875rem;
+  padding: 1rem 1.125rem 0.875rem;
+  background-color: var(--bg-input);
+}
+
+.ticketHeadInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-inline-size: 0;
+  flex: 1;
+}
+
+.stampRow {
+  display: flex;
+  align-items: center;
+  gap: 0.4375rem;
+  flex-wrap: wrap;
+}
+
+.readyBadge,
+.amberBadge,
+.neutralBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.1875rem 0.625rem;
+  border-radius: var(--radius-pill);
+  font-size: 0.75rem;
+  font-weight: 750;
+  line-height: 1.25;
+  transform: rotate(-1.5deg);
+}
+
+.readyBadge {
+  background-color: var(--brand-solid);
+  color: var(--brand-ink-on-solid);
+  box-shadow: 0 2px 0 var(--brand-lip);
+}
+
+.amberBadge {
+  background-color: var(--amber-bg);
+  color: var(--amber-ink);
+  border: 1.5px solid var(--amber-border);
+}
+
+.neutralBadge {
+  background-color: var(--bg-surface);
+  color: var(--ink-secondary);
+  border: 1px solid var(--border-hairline);
+}
+
+.closedTag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.1875rem 0.5625rem;
+  border-radius: var(--radius-pill);
+  background-color: var(--peach-soft-bg);
+  color: var(--peach-soft-ink);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.roomTitle {
+  font-size: 1.25rem;
+  font-weight: 800;
+  line-height: 1.25;
+  color: var(--ink-primary);
+}
+
+.roomMeta {
+  font-size: 0.8125rem;
+  font-weight: 550;
+  color: var(--ink-secondary);
+}
+
+/* Perforated ticket divider with left/right semicircular cutouts */
+.perforation {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 18px;
+  background-color: var(--bg-surface);
+}
+
+.dashedLine {
+  width: 100%;
+  margin-inline: 16px;
+  border-top: 2px dashed var(--border-hairline);
+}
+
+.notchLeft,
+.notchRight {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background-color: var(--bg-canvas);
+  border: 1.5px solid var(--border-hairline);
+}
+
+.notchLeft {
+  left: -10px;
+}
+
+.notchRight {
+  right: -10px;
+}
+
+.ticketBottom {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 0.5rem 1.125rem 1.125rem;
+}
+
+.emptyBody {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.875rem;
+}
+
+.emptyCopy {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-inline-size: 0;
+}
+
+.emptyPrimary {
+  font-size: 0.9375rem;
+  font-weight: 750;
+  color: var(--ink-primary);
+}
+
+.emptyHint {
+  font-size: 0.8125rem;
+  color: var(--ink-secondary);
+}
+
+.noOverlapBody {
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+}
+
+.departureBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+
+.departureEyebrow {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--ink-muted);
+}
+
+.heroTime {
+  font-size: 1.875rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--ink-primary);
+}
+
+.subHero {
+  font-size: 1.125rem;
+  font-weight: 750;
+  color: var(--ink-primary);
+}
+
+.copyLines {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1875rem;
+}
+
+.reasonLine {
+  font-size: 0.9375rem;
+  color: var(--ink-primary);
+}
+
+.windowLine {
+  font-size: 0.8125rem;
+  color: var(--ink-secondary);
+}
+
+.actions {
+  margin-top: 0.125rem;
+}
+
+.altDetails {
+  margin-top: 0.125rem;
+  padding-top: 0.5rem;
+  border-top: 1.5px dashed var(--border-hairline);
+}
+
+.altSummary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  list-style: none;
+  font-size: 0.8125rem;
+  font-weight: 650;
+  color: var(--ink-secondary);
+  cursor: pointer;
+  min-block-size: 32px;
+}
+
+.altSummary::-webkit-details-marker {
+  display: none;
+}
+
+.altChevron {
+  transition: transform 0.16s ease;
+}
+
+.altDetails[open] .altChevron {
+  transform: rotate(180deg);
+}
+
+.altList {
+  margin: 0.5rem 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.altItem {
+  font-size: 0.8125rem;
+  color: var(--ink-secondary);
+  padding: 0.4375rem 0.625rem;
+  border-radius: 10px;
+  background-color: var(--bg-input);
+  border: 1px solid var(--border-hairline);
+}

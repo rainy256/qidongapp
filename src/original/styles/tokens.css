@@ -1,0 +1,233 @@
+:root {
+  color-scheme: light dark;
+
+  /* Warm Cream Dot-Journal Surfaces (Zero Green) */
+  --bg-canvas: #fffbf4;
+  --bg-surface: #ffffff;
+  --bg-input: #fdf8f0;
+  --bg-subtle: #f7efe5;
+  --bg-hover: #efe4d6;
+  --dot-color: rgb(186 164 142 / 0.28);
+
+  --border-hairline: #efe2d2;
+  --border-control: #9e8e7e;
+
+  /* Cocoa & Espresso Ink */
+  --ink-primary: #2f2622;
+  --ink-secondary: #6e6058;
+  --ink-muted: #86766d;
+
+  /* Primary Blueberry-Periwinkle ("可开" & Main CTA — Zero Green) */
+  --brand-solid: #4e5cd6;
+  --brand-hover: #404ec7;
+  --brand-lip: #333ea3;
+  --brand-ink-on-solid: #ffffff;
+  --brand-soft-bg: #eef1ff;
+  --brand-soft-ink: #3b47b0;
+  --brand-soft-border: #c4ccfa;
+
+  /* Playful Coral-Peach (Stickers, Draft Capsule, Weekend Accents) */
+  --peach-solid: #ff7d6b;
+  --peach-lip: #d95a49;
+  --peach-soft-bg: #fff0ed;
+  --peach-soft-ink: #b3382c;
+  --peach-soft-border: #ffc4ba;
+
+  /* Honey-Butter ("还差 1 人") */
+  --amber-bg: #fff6d4;
+  --amber-ink: #854b00;
+  --amber-border: #f2c65a;
+
+  /* Danger / Errors */
+  --danger-bg: #fdecec;
+  --danger-ink: #a62b36;
+  --danger-border: #f0aeae;
+
+  /* Gummy Density Ramp (Warm Cream -> Sky-Periwinkle -> Blueberry) */
+  --density-0: #f4ede4;
+  --density-1: #e1e7ff;
+  --density-2: #bac8ff;
+  --density-3: #879dff;
+  --density-4: #4e5cd6;
+  --draft-track-bg: #f4ede4;
+  --draft-bar: #ff7d6b;
+
+  /* Duotone Icon & Personal Track Tokens (Zero Green) */
+  --icon-violet-stroke: #5b4399;
+  --icon-violet-fill: #e7dfff;
+  --icon-rose-stroke: #9e457c;
+  --icon-rose-fill: #ffddec;
+  --icon-honey-stroke: #965b12;
+  --icon-honey-fill: #ffe8ad;
+  --my-track-start: #ffbe94;
+  --my-track-mid: #f492b5;
+  --my-track-end: #dc78c2;
+  --my-track-lip: #bd5e9e;
+  --my-ink: #964376;
+  --my-soft-bg: #fff0f7;
+  --my-soft-border: #f2c4dc;
+  --glass-surface: rgb(255 252 248 / 0.84);
+  --glass-border: rgb(255 255 255 / 0.92);
+  --glass-ring: rgb(206 192 234 / 0.65);
+
+  /* Cozy Sticker Shadows & Squircle Radii */
+  --radius-card: 24px;
+  --radius-control: 14px;
+  --radius-pill: 999px;
+  --card-shadow: 0 5px 0 #efe2d2, 0 12px 26px rgb(135 102 68 / 0.08);
+  --shadow-subtle: 0 3px 0 #efe2d2, 0 6px 14px rgb(135 102 68 / 0.05);
+  --shadow-float: 0 6px 0 #e6d6c3, 0 14px 28px rgb(85 70 92 / 0.16);
+
+  /* Physics Spring Easing (fallback + linear()) */
+  --spring-fallback: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --spring-easing: linear(
+    0,
+    0.009,
+    0.035 2.1%,
+    0.141,
+    0.281 6.7%,
+    0.723 12.9%,
+    0.938 16.7%,
+    1.017,
+    1.077,
+    1.121,
+    1.149 24.3%,
+    1.159,
+    1.163,
+    1.161,
+    1.154 29.9%,
+    1.129 32.8%,
+    1.051 39.6%,
+    1.017 43.1%,
+    0.991,
+    0.977 51%,
+    0.974 53.8%,
+    0.975 57.1%,
+    0.997 69.8%,
+    1.003 76.9%,
+    1.004 83.8%,
+    1
+  );
+
+  /* Touch Target Size (WCAG 2.5.5 / 2.5.8) */
+  --target-size: 38px;
+}
+
+@media (pointer: coarse) {
+  :root {
+    --target-size: 44px;
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg-canvas: #1c1821;
+    --bg-surface: #27222e;
+    --bg-input: #211c27;
+    --bg-subtle: #312b3a;
+    --bg-hover: #3b3446;
+    --dot-color: rgb(195 178 214 / 0.14);
+
+    --border-hairline: #3c3447;
+    --border-control: #7d708c;
+
+    --ink-primary: #faf3ee;
+    --ink-secondary: #c4b7b0;
+    --ink-muted: #9e9092;
+
+    --brand-solid: #6574f2;
+    --brand-hover: #7684f7;
+    --brand-lip: #4653bd;
+    --brand-ink-on-solid: #ffffff;
+    --brand-soft-bg: #292e54;
+    --brand-soft-ink: #b9c3ff;
+    --brand-soft-border: #485296;
+
+    --peach-solid: #ff8e7e;
+    --peach-lip: #c95747;
+    --peach-soft-bg: #422528;
+    --peach-soft-ink: #ffb5aa;
+    --peach-soft-border: #784044;
+
+    --amber-bg: #3a2b14;
+    --amber-ink: #ffe07d;
+    --amber-border: #7a5c22;
+
+    --danger-bg: #3d1e24;
+    --danger-ink: #ffb0b8;
+    --danger-border: #7a3b45;
+
+    --density-0: #332c3d;
+    --density-1: #323966;
+    --density-2: #414d8f;
+    --density-3: #5564be;
+    --density-4: #7684f7;
+    --draft-track-bg: #332c3d;
+    --draft-bar: #ff8e7e;
+
+    --icon-violet-stroke: #c7b8ff;
+    --icon-violet-fill: rgb(156 130 250 / 0.3);
+    --icon-rose-stroke: #f7b4dc;
+    --icon-rose-fill: rgb(236 134 192 / 0.3);
+    --icon-honey-stroke: #ffe18f;
+    --icon-honey-fill: rgb(255 210 102 / 0.28);
+    --my-track-start: #f5b48c;
+    --my-track-mid: #ee8eb6;
+    --my-track-end: #d97ac8;
+    --my-track-lip: #974886;
+    --my-ink: #f6b8dd;
+    --my-soft-bg: #3b2436;
+    --my-soft-border: #764468;
+    --glass-surface: rgb(42 35 56 / 0.84);
+    --glass-border: rgb(192 178 232 / 0.36);
+    --glass-ring: rgb(164 146 218 / 0.32);
+
+    --card-shadow: 0 5px 0 #15121a, 0 14px 28px rgb(0 0 0 / 0.36);
+    --shadow-subtle: 0 3px 0 #15121a, 0 6px 14px rgb(0 0 0 / 0.28);
+    --shadow-float: 0 6px 0 #15121a, 0 14px 32px rgb(0 0 0 / 0.5);
+  }
+}
+
+@media (forced-colors: active) {
+  :root {
+    --bg-canvas: Canvas;
+    --bg-surface: Canvas;
+    --bg-input: Canvas;
+    --bg-subtle: Canvas;
+    --bg-hover: Highlight;
+    --border-hairline: ButtonBorder;
+    --border-control: ButtonBorder;
+    --ink-primary: CanvasText;
+    --ink-secondary: CanvasText;
+    --ink-muted: GrayText;
+    --brand-solid: Highlight;
+    --brand-hover: Highlight;
+    --brand-lip: ButtonBorder;
+    --brand-ink-on-solid: HighlightText;
+    --brand-soft-bg: Canvas;
+    --brand-soft-ink: CanvasText;
+    --brand-soft-border: Highlight;
+    --peach-soft-bg: Canvas;
+    --peach-soft-ink: CanvasText;
+    --peach-soft-border: Highlight;
+    --amber-bg: Canvas;
+    --amber-ink: CanvasText;
+    --amber-border: Highlight;
+    --draft-bar: Highlight;
+    --icon-violet-stroke: CanvasText;
+    --icon-violet-fill: Canvas;
+    --icon-rose-stroke: CanvasText;
+    --icon-rose-fill: Canvas;
+    --icon-honey-stroke: CanvasText;
+    --icon-honey-fill: Canvas;
+    --my-track-start: Highlight;
+    --my-track-mid: Highlight;
+    --my-track-end: Highlight;
+    --my-track-lip: ButtonBorder;
+    --my-ink: CanvasText;
+    --my-soft-bg: Canvas;
+    --my-soft-border: Highlight;
+    --card-shadow: none;
+    --shadow-subtle: none;
+  }
+}

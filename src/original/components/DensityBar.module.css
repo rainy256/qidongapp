@@ -1,0 +1,489 @@
+.root {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5625rem;
+  padding: 0.875rem 0.9375rem;
+  border-radius: 18px;
+  background-color: var(--bg-input);
+  border: 1px solid var(--border-hairline);
+}
+
+.topBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.titleGroup {
+  display: flex;
+  align-items: center;
+  gap: 0.4375rem;
+  flex-wrap: wrap;
+  min-inline-size: 0;
+}
+
+.label {
+  font-size: 0.8125rem;
+  font-weight: 750;
+  color: var(--ink-primary);
+  white-space: nowrap;
+}
+
+.statusBadge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.125rem 0.5rem;
+  border-radius: var(--radius-pill);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+
+.badge_ready {
+  background-color: #efeafe;
+  color: #5b3bb8;
+}
+
+.badge_almost {
+  background-color: var(--amber-bg);
+  color: var(--amber-ink);
+}
+
+.badge_info {
+  background-color: #efeafe;
+  color: #5b3bb8;
+}
+
+.badge_neutral {
+  background-color: var(--bg-subtle);
+  color: var(--ink-secondary);
+}
+
+.badge_muted {
+  background-color: transparent;
+  color: var(--ink-muted);
+  padding-inline: 0;
+}
+
+.inspectBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.1875rem;
+  padding: 0.25rem 0.5625rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--ink-secondary);
+  font-size: 0.75rem;
+  font-weight: 650;
+  min-block-size: 34px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+@media (pointer: coarse) {
+  .inspectBtn {
+    min-block-size: var(--target-size);
+  }
+}
+
+.inspectBtn:hover {
+  background-color: var(--bg-subtle);
+  color: var(--ink-primary);
+}
+
+.chevron,
+.chevronOpen {
+  transition: transform 0.16s ease;
+}
+
+.chevronOpen {
+  transform: rotate(180deg);
+}
+
+/* Uniform horizontal Nebula Aurora heat block grid */
+.heatGrid {
+  display: grid;
+  gap: 3.5px;
+  padding: 2px 0 4px;
+}
+
+.heatCell {
+  position: relative;
+}
+
+.heatBlock {
+  position: relative;
+  overflow: hidden;
+  height: 17px;
+  width: 100%;
+  border-radius: 7px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition:
+    background 0.18s ease,
+    transform 0.22s var(--spring-fallback),
+    box-shadow 0.18s ease;
+  user-select: none;
+}
+
+.sparkle {
+  position: relative;
+  z-index: 2;
+  font-size: 9px;
+  line-height: 1;
+  color: rgb(255 255 255 / 0.92);
+  animation: nebulaTwinkle 2.2s ease-in-out var(--shimmer-delay, 0s) infinite;
+  pointer-events: none;
+}
+
+@keyframes nebulaTwinkle {
+  0%,
+  100% {
+    opacity: 0.45;
+    transform: scale(0.85);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.1);
+  }
+}
+
+.heatBlock:not(.level0)::before {
+  content: '';
+  position: absolute;
+  inset: 1.5px 2px auto 2px;
+  height: 44%;
+  border-radius: 4px 4px 6px 6px;
+  background: linear-gradient(180deg, rgb(255 255 255 / 0.56) 0%, rgb(255 255 255 / 0.08) 100%);
+  pointer-events: none;
+}
+
+.isPeak::after {
+  content: '';
+  position: absolute;
+  inset-block: -2px;
+  inset-inline-start: -70%;
+  width: 70%;
+  background: linear-gradient(
+    110deg,
+    transparent 0%,
+    rgb(255 255 255 / 0.62) 48%,
+    transparent 100%
+  );
+  animation: crystalShimmer 3.4s ease-in-out var(--shimmer-delay, 0s) infinite;
+  pointer-events: none;
+}
+
+@keyframes crystalShimmer {
+  0%,
+  52% {
+    transform: translateX(0);
+    opacity: 0;
+  }
+  64% {
+    opacity: 1;
+  }
+  92%,
+  100% {
+    transform: translateX(320%);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .isPeak::after {
+    animation: none;
+    opacity: 0;
+  }
+  .sparkle {
+    animation: none;
+    opacity: 0.75;
+  }
+}
+
+@media (hover: hover) {
+  .heatCell:hover .heatBlock:not(.level0) {
+    transform: translateY(-1.5px);
+  }
+}
+
+.level0 {
+  background-color: #f2eef6;
+  box-shadow: inset 0 0 0 1px rgb(178 166 198 / 0.25);
+}
+
+.level1 {
+  background: linear-gradient(180deg, #eef4ff 0%, #dce7ff 100%);
+  box-shadow:
+    0 2px 0 #c2d4fa,
+    inset 0 1px 0 rgb(255 255 255 / 0.9);
+}
+
+.level2 {
+  background: linear-gradient(180deg, #d9d8ff 0%, #bec2ff 100%);
+  box-shadow:
+    0 2px 0 #9fa4f5,
+    inset 0 1px 0 rgb(255 255 255 / 0.75);
+}
+
+.level3 {
+  background: linear-gradient(180deg, #b8afff 0%, #9687f7 100%);
+  box-shadow:
+    0 2px 0 #7666df,
+    0 3px 8px rgb(150 135 247 / 0.28),
+    inset 0 1px 0 rgb(255 255 255 / 0.6);
+}
+
+.level4 {
+  background: linear-gradient(180deg, #9c82fa 0%, #785ae8 100%);
+  box-shadow:
+    0 2.5px 0 #593cc4,
+    0 4px 10px rgb(120 90 232 / 0.34),
+    inset 0 1px 0 rgb(255 255 255 / 0.52);
+}
+
+.level5 {
+  background: linear-gradient(180deg, #8a68f7 0%, #613ed4 100%);
+  box-shadow:
+    0 2.5px 0 #4628a8,
+    0 4px 12px rgb(97 62 212 / 0.4),
+    inset 0 1px 0 rgb(255 255 255 / 0.58);
+}
+
+.midnightDivider::before {
+  content: '';
+  position: absolute;
+  inset-block: -2px;
+  inset-inline-start: -2.5px;
+  width: 2px;
+  border-radius: 2px;
+  background-color: rgb(220 120 194 / 0.52);
+  z-index: 2;
+  pointer-events: none;
+}
+
+/* Slim personal apricot-rose-orchid track */
+.myBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3125rem;
+  padding-top: 0.0625rem;
+}
+
+.myHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.myLabelWrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+.myDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--my-track-start) 0%, var(--my-track-end) 100%);
+  box-shadow: 0 0 0 2.5px rgb(228 126 184 / 0.2);
+  flex-shrink: 0;
+}
+
+.myCaption {
+  font-size: 0.75rem;
+  font-weight: 650;
+  color: var(--my-ink);
+}
+
+.myTimeReadout {
+  font-size: 0.75rem;
+  font-weight: 650;
+  color: var(--ink-secondary);
+}
+
+.myRail {
+  display: grid;
+  gap: 3.5px;
+  height: 8px;
+  border-radius: 999px;
+  background-color: #f3eef8;
+  align-items: center;
+}
+
+.mySegment {
+  height: 8px;
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    var(--my-track-start) 0%,
+    var(--my-track-mid) 52%,
+    var(--my-track-end) 100%
+  );
+  box-shadow:
+    0 1.5px 0 var(--my-track-lip),
+    0 2px 8px rgb(224 126 184 / 0.28),
+    inset 0 1px 0 rgb(255 255 255 / 0.62);
+}
+
+/* Clean time axis & heat legend */
+.axis {
+  position: relative;
+  height: 1rem;
+  font-size: 0.72rem;
+  color: var(--ink-muted);
+}
+
+.tick {
+  position: absolute;
+  top: 0;
+  white-space: nowrap;
+}
+
+.tick_start {
+  transform: translateX(0);
+}
+
+.tick_center {
+  transform: translateX(-50%);
+}
+
+.tick_end {
+  transform: translateX(-100%);
+}
+
+.heatLegend {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.25rem;
+  font-size: 0.6875rem;
+  color: var(--ink-muted);
+}
+
+.legendSwatch {
+  width: 13px;
+  height: 8px;
+  border-radius: 3.5px;
+  box-shadow: none;
+}
+
+.hoverReadout {
+  font-size: 0.8125rem;
+  color: var(--ink-secondary);
+  padding: 0.125rem 0;
+}
+
+.breakdown {
+  margin-top: 0.125rem;
+  padding: 0.625rem 0.75rem;
+  border-radius: 14px;
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-hairline);
+}
+
+.breakdownEmpty {
+  font-size: 0.8125rem;
+  color: var(--ink-secondary);
+}
+
+.breakdownList {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.breakdownRow {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  font-size: 0.8125rem;
+}
+
+.breakdownTime {
+  font-weight: 700;
+  color: var(--ink-primary);
+}
+
+.breakdownCount {
+  color: #5b3bb8;
+  font-weight: 700;
+}
+
+.breakdownNames {
+  color: var(--ink-secondary);
+}
+
+@media (prefers-color-scheme: dark) {
+  .badge_ready,
+  .badge_info {
+    background-color: #352859;
+    color: #d5c4ff;
+  }
+
+  .breakdownCount {
+    color: #d5c4ff;
+  }
+
+  .level0 {
+    background-color: #2e2938;
+    box-shadow: none;
+  }
+
+  .level1 {
+    background: linear-gradient(180deg, #3c4878 0%, #313b63 100%);
+    box-shadow:
+      0 2px 0 #1e2445,
+      inset 0 1px 0 rgb(255 255 255 / 0.16);
+  }
+
+  .level2 {
+    background: linear-gradient(180deg, #51519e 0%, #434385 100%);
+    box-shadow:
+      0 2px 0 #2b2b5e,
+      inset 0 1px 0 rgb(255 255 255 / 0.2);
+  }
+
+  .level3 {
+    background: linear-gradient(180deg, #6e5fc9 0%, #5d50ad 100%);
+    box-shadow:
+      0 2px 0 #3f3480,
+      0 3px 8px rgb(93 80 173 / 0.28),
+      inset 0 1px 0 rgb(255 255 255 / 0.24);
+  }
+
+  .level4 {
+    background: linear-gradient(180deg, #8e73f0 0%, #7b60d9 100%);
+    box-shadow:
+      0 2.5px 0 #523aa8,
+      0 3px 10px rgb(123 96 217 / 0.32),
+      inset 0 1px 0 rgb(255 255 255 / 0.28);
+  }
+
+  .level5 {
+    background: linear-gradient(180deg, #a88bff 0%, #9576f5 100%);
+    box-shadow:
+      0 2.5px 0 #6649c4,
+      0 4px 12px rgb(149 118 245 / 0.38),
+      inset 0 1px 0 rgb(255 255 255 / 0.34);
+  }
+
+  .legendSwatch {
+    box-shadow: none;
+  }
+
+  .myRail {
+    background-color: #2f293c;
+  }
+}
