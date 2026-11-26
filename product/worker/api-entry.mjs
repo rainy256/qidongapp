@@ -13,7 +13,7 @@ export default {async fetch(req,env){
  const h=new Headers();
  for(const k of ['Authorization','Content-Type','Origin','Access-Control-Request-Method','Access-Control-Request-Headers']){const v=req.headers.get(k);if(v!==null)h.set(k,v);}
  try{
-  const response=await env.APP.fetch(new Request(target,{method:req.method,headers:h,body:req.method==='POST'?req.body:undefined,redirect:'manual'}));
+  const response=await env.APP.fetch(new Request(target,{method:req.method,headers:h,body:req.method==='POST'?req.body:undefined,duplex:'half',redirect:'manual'}));
   const headers=new Headers(response.headers);headers.delete('Set-Cookie');headers.set('Cache-Control','no-store');
   return new Response(response.body,{status:response.status,headers});
  }catch{return fail('upstream_unavailable',503);}
