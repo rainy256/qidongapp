@@ -73,7 +73,10 @@ export type Nudge = {
   status: string;
 };
 
+export type ReservationDraft = { game: GameTag; title: string; from: number | null };
+
 export type Snapshot = {
+  clientClock?: number;
   features?: { rebook: boolean };
   reservations: Reservation[];
   reservationMessages: ReservationMessage[];
