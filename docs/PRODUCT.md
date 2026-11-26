@@ -33,3 +33,6 @@ Android Keystore AES-GCM 原生插件已编写，产品构建配置单独生成 
 
 ## 成员激活界面（待下一次 APK 发布）
 新界面先选固定成员，再粘贴本人专属一次性口令；服务器同时核验成员与口令匹配，兼容旧 APK 无 memberId 的请求。管理员本地签发工具生成 128 位随机口令（32 个十六进制字符），无需改数据库结构。现有 64 字符口令仍兼容；数据库只保存 SHA-256。签发及 SPT 加密密钥配置必须由有权限的管理员在安全环境完成，此提交不写入任何真实口令或密钥，不重置已激活成员。
+
+## 鸿蒙 PWA
+独立地址 `https://qidongapp.rainy256.workers.dev/app/`，由同一正式 Worker 提供入口与 API。GitHub Actions `Publish PWA static build` 构建至 `dist-pwa` 并发布独立 `pwa-static` 分支；Worker 仅向固定公开分支读取白名单静态文件，不转发认证头或 Cookie，不依赖浏览器直连 GitHub。APK 构建保持原路径。网页激活用 HttpOnly/Secure/SameSite=Strict Cookie（API 路径），写操作必须同源 JSON；旧 APK 仍用原 Bearer。通知入口可选择网页或 APK。PWA 清除浏览器数据可能需要管理员重新授权；同一成员仍为单设备授权，尚无多设备绑定。Service Worker 只缓存离线提示，不缓存私人数据，联网方可约局。鸿蒙浏览器是否支持独立窗口/桌面安装需真机确认。签发口令与 SPT 加密密钥仍需安全初始化，不由网页公开配置。

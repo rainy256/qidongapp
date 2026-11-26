@@ -1,3 +1,4 @@
+import {pwaStatic,pwaLanding,webCookie,sessionCookie,validWebWrite} from './pwa.mjs';
 import {MEMBER_IDS,REPLIES,GAMES,normalizeSchedule,replyColumn,mutationValid,secretValid,digest,newToken,inviteView} from './logic.mjs';
 import {latestVersion} from './version.mjs';
 import {encryptSpt,validSpt} from './spt.mjs';
@@ -10,23 +11,34 @@ const publicInvite='id,creator,game,title,created_at,expires_at,revision,r1,r2,r
 async function body(req){try{const s=await req.text();if(s.length>20000)return null;return JSON.parse(s);}catch{return null;}}
 async function authenticate(req,env){
  const auth=req.headers.get('Authorization')||'';
- if(!auth.startsWith('Bearer ')||!secretValid(auth.slice(7)))return null;
- return env.DB.prepare('SELECT id,nickname FROM app_members WHERE token_hash=?').bind(await digest(auth.slice(7))).first();
+ const token=auth?auth.startsWith('Bearer ')?auth.slice(7):'':webCookie(req);
+ if(!secretValid(token))return null;
+ if(!auth&&req.method!=='GET'&&!validWebWrite(req))return null;
+ return env.DB.prepare('SELECT id,nickname FROM app_members WHERE token_hash=?').bind(await digest(token)).first();
 }
 export default {async fetch(req,env,ctx){
  const u=new URL(req.url),path=u.pathname,now=Date.now();
  const kick=()=>ctx.waitUntil(drainPush(env).catch(()=>{}));
- const link=path.match(/^\/game\/([0-9a-f-]{36})$/);if(link&&req.method==='GET')return new Response('<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><h1>启动！</h1><p>请在已绑定身份的 App 内查看约局。</p><a href="qidongapp://game/'+link[1]+'">打开启动！</a></html>',{headers:{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','Content-Security-Policy':"default-src 'none'; frame-ancestors 'none'"}});
+ if(req.method==='GET'){
+  if(path==='/'||path==='/app')return Response.redirect(u.origin+'/app/',302);
+  const landing=pwaLanding(path);if(landing)return landing;
+  if(path.startsWith('/app/')||path.startsWith('/art/'))return pwaStatic(req);
+ }
  if(req.method==='OPTIONS')return new Response(null,{status:204,headers:HEADERS});
  if(path==='/api/health'&&req.method==='GET')return json({ok:true,stage:'product-foundation'});
  try{
-  if(path==='/api/activate'&&req.method==='POST'){
+  if((path==='/api/activate'||path==='/api/web/activate')&&req.method==='POST'){
+   const web=path==='/api/web/activate';if(web&&!validWebWrite(req))return json({error:'invalid_origin'},403);
+   if(web&&await authenticate(req,env))return json({error:'already_activated'},409);
    const b=await body(req);if(!secretValid(b?.code)||(b.memberId!==undefined&&!MEMBER_IDS.includes(b.memberId)))return json({error:'invalid_activation'},401);
    const token=newToken();
    const member=await env.DB.prepare('UPDATE app_members SET activation_hash=NULL,token_hash=?,activated_at=?,last_seen=? WHERE activation_hash=? AND activated_at IS NULL AND (? IS NULL OR id=?) RETURNING id,nickname').bind(await digest(token),now,now,await digest(b.code),b.memberId??null,b.memberId??null).first();
-   return member?json({member,token}):json({error:'invalid_activation'},401);
+   if(!member)return json({error:'invalid_activation'},401);
+   if(web){const headers=new Headers(HEADERS);headers.set('Set-Cookie',sessionCookie(token));return new Response(JSON.stringify({member}),{headers});}
+   return json({member,token});
   }
   const me=await authenticate(req,env);if(!me)return json({error:'unauthorized'},401);
+  if(path==='/api/web/session'&&req.method==='GET')return json({member:me});
   if(path==='/api/version'&&req.method==='GET'){try{return json(await latestVersion());}catch{return json({error:'version_unavailable'},503);}}
   if(path==='/api/push'&&req.method==='GET'){
    const r=await env.DB.prepare('SELECT bound_at FROM app_push_bindings WHERE member_id=?').bind(me.id).first();

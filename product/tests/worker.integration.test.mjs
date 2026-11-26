@@ -58,3 +58,23 @@ test('three-member activation, authenticated state, invitations, outbox, reserva
   const msg=s.data.messages[0];assert.ok(msg);assert.equal((await req('/api/messages/read','m2',{id:msg.id})).status,200);assert.equal(db.prepare('SELECT read_at FROM app_messages WHERE id=?').get(msg.id).read_at,null);
  }finally{globalThis.fetch=originalFetch;db.close();}
 });
+
+test('PWA cookie activation, session isolation and CSRF rejection',async()=>{
+ const {db,env}=setup(),origin='https://qidongapp.example';const code=crypto.randomUUID().replaceAll('-','');db.prepare('UPDATE app_members SET activation_hash=? WHERE id=?').run(await digest(code),'m1');
+ const call=(path,init={})=>worker.fetch(new Request(origin+path,init),env,{waitUntil(){}});
+ try{
+  const body=JSON.stringify({code,memberId:'m1'});
+  const headers={'Content-Type':'application/json',Origin:origin};
+  assert.equal((await call('/api/web/activate',{method:'POST',headers:{...headers,Origin:'https://other.example'},body})).status,403);
+  const response=await call('/api/web/activate',{method:'POST',headers,body});
+  assert.equal(response.status,200);assert.equal((await response.json()).token,undefined);
+  const set=response.headers.get('Set-Cookie');assert.match(set,/HttpOnly/);assert.match(set,/SameSite=Strict/);assert.match(set,/Secure/);
+  const cookie=set.split(';')[0];assert.equal((await call('/api/web/session',{headers:{Cookie:cookie}})).status,200);
+  assert.equal((await call('/api/state',{headers:{Cookie:cookie}})).status,200);
+  assert.equal((await call('/api/state')).status,401);
+  const edit=JSON.stringify({nickname:'网页版测试'});
+  assert.equal((await call('/api/profile',{method:'POST',headers:{...headers,Origin:'https://other.example',Cookie:cookie},body:edit})).status,401);
+  assert.equal((await call('/api/profile',{method:'POST',headers:{...headers,Cookie:cookie},body:edit})).status,200);
+  assert.equal(db.prepare('SELECT nickname FROM app_members WHERE id=?').get('m1').nickname,'网页版测试');
+ }finally{db.close();}
+});
