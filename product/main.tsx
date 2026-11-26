@@ -14,7 +14,7 @@ import '../src/original/styles/global.css';
 import './product.css';
 import {PushSettings,ReservationPanel,WeeklyTemplate,VersionSettings} from './features';
 import {AccountPanel} from './account';
-import {isPwa,webAuth,fetchWithTimeout,InstallPanel,registerPwa,readLaunch} from './pwa/client';
+import {isPwa,webAuth,fetchWithTimeout,apiEndpoint,InstallPanel,registerPwa,readLaunch} from './pwa/client';
 
 type Member={id:string;nickname:string;schedule:Span[];schedule_revision:number;last_seen:number|null;template?:{day:number;from:number;to:number}[];overrideDays?:number[]};
 type Invite={id:string;creator:string;game:GameTag;title:string;created_at:number;expires_at:number;revision:number;r1:string;r2:string;r3:string;status:'pending'|'assembled'|'expired'};
@@ -24,7 +24,7 @@ type ReservationMessage={id:string;reservation_id:string;detail:string;created_a
 type Nudge={id:string;invite_id:string;detail:string;created_at:number;status:string};
 type Snapshot={reservations:Reservation[];reservationMessages:ReservationMessage[];nudges:Nudge[];me:{id:string;nickname:string};members:Member[];invites:Invite[];messages:Message[];now:number};
 type Page='home'|'schedule'|'messages'|'me';
-const apiBase=isPwa?'':(import.meta.env.VITE_APP_API||'https://qidongapp.apexdaishi.xyz').replace(/\/$/,'');
+const apiBase=isPwa?'':(import.meta.env.VITE_APP_API||'https://qidong.apexdaishi.xyz/app-api').replace(/\/$/,'');
 const SecureSession=registerPlugin<{get():Promise<{token?:string}>;set(input:{token:string}):Promise<void>;clear():Promise<void>}>('SecureSession');
 const labels:Record<string,string>={pending:'待回复',ready:'马上来','5':'等5分钟','10':'等10分钟','30':'等30分钟',no:'今天不玩'};
 const games:Record<GameTag,string>={apex:'Apex',gta:'GTA',tarkov:'塔科夫',custom:'自定义'};
@@ -32,7 +32,7 @@ const reply=(inv:Invite,id:string)=>id==='m1'?inv.r1:id==='m2'?inv.r2:inv.r3;
 const stamp=(ms:number)=>new Date(ms).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false,month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'});
 class ApiError extends Error{constructor(public status:number,public code:string){super(code);}}
 async function api<T>(path:string,token:string|null,input?:object):Promise<T>{
- const res=await fetchWithTimeout(apiBase+path,{method:input?'POST':'GET',headers:{...webAuth(token),...(input?{'Content-Type':'application/json'}:{})},...(input?{body:JSON.stringify(input)}:{})});
+ const res=await fetchWithTimeout(apiEndpoint(apiBase,path),{method:input?'POST':'GET',headers:{...webAuth(token),...(input?{'Content-Type':'application/json'}:{})},...(input?{body:JSON.stringify(input)}:{})});
  const data=await res.json();if(!res.ok)throw new ApiError(res.status,data.error||'request_failed');return data;
 }
 function errorMessage(e:unknown){return e instanceof ApiError?e.status===409?'数据已更新或邀请已过期，请刷新后重试':e.status===401?'身份凭证无效，请联系管理员':e.status===429?'操作过于频繁，请稍后重试':e.code==='push_key_not_configured'?'通知加密密钥尚未配置，请联系管理员':e.status===400?'输入内容不符合要求':'服务端请求失败（'+e.status+'）':'网络连接失败，请重试';}

@@ -1,5 +1,5 @@
 import {useEffect,useState} from 'react';
-import {webAuth,fetchWithTimeout} from './pwa/client';
+import {webAuth,fetchWithTimeout,apiEndpoint} from './pwa/client';
 import type {GameTag,Candidate} from '../src/original/domain/types';
 type PushState={bound:boolean;keyConfigured:boolean;quietStart:number|null;quietEnd:number|null;test:{id:string;status:string}|null};
 const time=(n:number|null)=>n===null?'':String(Math.floor(n/60)).padStart(2,'0')+':'+String(n%60).padStart(2,'0');
@@ -7,7 +7,7 @@ const minute=(s:string)=>s?Number(s.slice(0,2))*60+Number(s.slice(3)):null;
 const statusLabels:Record<string,string>={queued:'已排队，尚未发送',sending:'发送中',accepted:'WxPusher 已受理，尚未确认手机收到',confirmed:'你已确认收到',unknown:'发送结果未知',rejected:'发送被拒绝',expired:'已过期',muted:'免打扰未发送',unbound:'未绑定'};
 export function PushSettings({token,apiBase}:{token:string;apiBase:string}){
  const [state,setState]=useState<PushState|null>(null),[spt,setSpt]=useState(''),[quietStart,setStart]=useState(''),[quietEnd,setEnd]=useState(''),[notice,setNotice]=useState(''),[busy,setBusy]=useState(false);
- async function request(path:string,body?:object){const res=await fetchWithTimeout(apiBase+path,{method:body?'POST':'GET',headers:{...webAuth(token),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});const data=await res.json();if(!res.ok)throw Error(data.error||'request_failed');return data;}
+ async function request(path:string,body?:object){const res=await fetchWithTimeout(apiEndpoint(apiBase,path),{method:body?'POST':'GET',headers:{...webAuth(token),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});const data=await res.json();if(!res.ok)throw Error(data.error||'request_failed');return data;}
  async function load(){const s=await request('/api/push') as PushState;setState(s);return s;}
  useEffect(()=>{let alive=true;request('/api/push').then((s:PushState)=>{if(alive){setState(s);setStart(time(s.quietStart));setEnd(time(s.quietEnd));}}).catch(()=>{if(alive)setNotice('读取推送设置失败');});return()=>{alive=false;};},[token,apiBase]);
  useEffect(()=>{if(!state?.test||!['queued','sending'].includes(state.test.status))return;const t=setInterval(()=>{if(!document.hidden)void load().catch(()=>{});},3000);return()=>clearInterval(t);},[state?.test?.status,token,apiBase]);
@@ -45,6 +45,6 @@ export function WeeklyTemplate({member,now,busy,write}:{member:{schedule_revisio
 export function VersionSettings({token,apiBase}:{token:string;apiBase:string}){
  const current=import.meta.env.VITE_APP_VERSION||'0.1.0';
  const [notice,setNotice]=useState(''),[url,setUrl]=useState(''),[busy,setBusy]=useState(false);
- async function check(){setBusy(true);setUrl('');setNotice('');try{const r=await fetch(apiBase+'/api/version',{headers:{Authorization:'Bearer '+token},signal:AbortSignal.timeout(12000)});if(!r.ok)throw Error();const d=await r.json();const parts=current.split('.').map(Number),code=parts[0]*1000000+parts[1]*1000+parts[2];if(!d.available){setNotice('尚无正式签名发布版。');}else if(d.versionCode>code&&typeof d.url==='string'&&d.url.startsWith('https://github.com/rainy256/qidongapp/releases/download/')){setNotice('发现新版本 '+d.version);setUrl(d.url);}else setNotice('当前没有更高版本。');}catch{setNotice('检查失败，请稍后重试。');}finally{setBusy(false);}}
+ async function check(){setBusy(true);setUrl('');setNotice('');try{const r=await fetchWithTimeout(apiEndpoint(apiBase,'/api/version'),{headers:{Authorization:'Bearer '+token}});if(!r.ok)throw Error();const d=await r.json();const parts=current.split('.').map(Number),code=parts[0]*1000000+parts[1]*1000+parts[2];if(!d.available){setNotice('尚无正式签名发布版。');}else if(d.versionCode>code&&typeof d.url==='string'&&d.url.startsWith('https://github.com/rainy256/qidongapp/releases/download/')){setNotice('发现新版本 '+d.version);setUrl(d.url);}else setNotice('当前没有更高版本。');}catch{setNotice('检查失败，请稍后重试。');}finally{setBusy(false);}}
  return <section className="paper"><h2>版本更新</h2><p>当前版本 {current}</p><button disabled={busy} onClick={()=>void check()}>检查更新</button>{notice&&<p role="status">{notice}</p>}{url&&<a href={url} target="_blank" rel="noreferrer">下载正式签名 APK</a>}</section>;
 }

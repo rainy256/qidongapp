@@ -2,6 +2,9 @@ import {useEffect,useState} from 'react';
 import {Capacitor} from '@capacitor/core';
 export const isPwa=import.meta.env.VITE_PWA==='1'&&!Capacitor.isNativePlatform();
 export function webAuth(token:string|null):Record<string,string>{return !isPwa&&token?{Authorization:'Bearer '+token}:{};}
+export function apiEndpoint(base:string,path:string){
+ return base.endsWith('/app-api')&&path.startsWith('/api/')?base+path.slice(4):base+path;
+}
 export async function fetchWithTimeout(url:string,init:RequestInit={}){
  const ctl=new AbortController(),timer=setTimeout(()=>ctl.abort(),12000);
  try{return await fetch(url,{...init,credentials:isPwa?'same-origin':'omit',cache:'no-store',signal:ctl.signal});}finally{clearTimeout(timer);}

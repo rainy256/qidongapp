@@ -1,10 +1,10 @@
 import {useEffect,useState} from 'react';
-import {isPwa,webAuth,fetchWithTimeout} from './pwa/client';
+import {isPwa,webAuth,fetchWithTimeout,apiEndpoint} from './pwa/client';
 type Device={id:string;kind:'android'|'web'|'legacy';created_at:number;expires_at:number|null};
 type Account={passwordConfigured:boolean;currentSession:string;sessions:Device[]};
 export function AccountPanel({token,apiBase,onSession}:{token:string;apiBase:string;onSession:(token:string|null)=>Promise<void>}){
  const [state,setState]=useState<Account|null>(null),[current,setCurrent]=useState(''),[password,setPassword]=useState(''),[confirm,setConfirm]=useState(''),[notice,setNotice]=useState(''),[busy,setBusy]=useState(false);
- async function call(path:string,body?:object){const r=await fetchWithTimeout(apiBase+path,{method:body?'POST':'GET',headers:{...webAuth(token),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});const data=await r.json();if(!r.ok)throw Error(data.error||'request_failed');return data;}
+ async function call(path:string,body?:object){const r=await fetchWithTimeout(apiEndpoint(apiBase,path),{method:body?'POST':'GET',headers:{...webAuth(token),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});const data=await r.json();if(!r.ok)throw Error(data.error||'request_failed');return data;}
  async function load(){setState(await call('/api/account'));}
  useEffect(()=>{let alive=true;call('/api/account').then(x=>{if(alive)setState(x);}).catch(()=>{if(alive)setNotice('无法读取账号设置，请刷新重试。');});return()=>{alive=false;};},[token,apiBase]);
  const valid=password.length>=16&&password.length<=128&&password.trim()===password&&password===confirm&&(!state?.passwordConfigured||!!current);

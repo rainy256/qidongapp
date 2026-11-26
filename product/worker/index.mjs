@@ -21,7 +21,7 @@ export default {async fetch(req,env,ctx){
  if(req.method==='OPTIONS')return new Response(null,{status:204,headers:HEADERS});
  if(path==='/api/health'&&req.method==='GET')return json({ok:true,stage:'product-foundation'});
  try{
-  if((path==='/api/login'||path==='/api/web/login')&&req.method==='POST')return login(req,env,await body(req),now,json,HEADERS);
+  if((path==='/api/login'||path==='/api/web/login')&&req.method==='POST')return await login(req,env,await body(req),now,json,HEADERS);
   if((path==='/api/activate'||path==='/api/web/activate')&&req.method==='POST'){
    const web=path==='/api/web/activate';if(web&&!validWebWrite(req))return json({error:'invalid_origin'},403);
    if(web&&await authenticate(req,env,now))return json({error:'already_activated'},409);
@@ -34,7 +34,7 @@ export default {async fetch(req,env,ctx){
    return json({member,token});
   }
   const auth=await authenticate(req,env,now);if(!auth)return json({error:'unauthorized'},401);const me=auth.member;
-  if(path==='/api/account'||path.startsWith('/api/account/'))return account(req,env,auth,req.method==='POST'?await body(req):null,now,json,HEADERS);
+  if(path==='/api/account'||path.startsWith('/api/account/'))return await account(req,env,auth,req.method==='POST'?await body(req):null,now,json,HEADERS);
   if(path==='/api/web/session'&&req.method==='GET')return json({member:me});
   if(path==='/api/version'&&req.method==='GET'){try{return json(await latestVersion());}catch{return json({error:'version_unavailable'},503);}}
   if(path==='/api/push'&&req.method==='GET'){
