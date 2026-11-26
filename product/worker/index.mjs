@@ -21,9 +21,9 @@ export default {async fetch(req,env,ctx){
  if(path==='/api/health'&&req.method==='GET')return json({ok:true,stage:'product-foundation'});
  try{
   if(path==='/api/activate'&&req.method==='POST'){
-   const b=await body(req);if(!secretValid(b?.code))return json({error:'invalid_activation'},401);
+   const b=await body(req);if(!secretValid(b?.code)||(b.memberId!==undefined&&!MEMBER_IDS.includes(b.memberId)))return json({error:'invalid_activation'},401);
    const token=newToken();
-   const member=await env.DB.prepare('UPDATE app_members SET activation_hash=NULL,token_hash=?,activated_at=?,last_seen=? WHERE activation_hash=? AND activated_at IS NULL RETURNING id,nickname').bind(await digest(token),now,now,await digest(b.code)).first();
+   const member=await env.DB.prepare('UPDATE app_members SET activation_hash=NULL,token_hash=?,activated_at=?,last_seen=? WHERE activation_hash=? AND activated_at IS NULL AND (? IS NULL OR id=?) RETURNING id,nickname').bind(await digest(token),now,now,await digest(b.code),b.memberId??null,b.memberId??null).first();
    return member?json({member,token}):json({error:'invalid_activation'},401);
   }
   const me=await authenticate(req,env);if(!me)return json({error:'unauthorized'},401);

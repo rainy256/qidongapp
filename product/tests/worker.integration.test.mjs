@@ -28,7 +28,8 @@ test('three-member activation, authenticated state, invitations, outbox, reserva
   for(const id of ['m1','m2','m3']){
    const code=crypto.randomUUID().replaceAll('-','')+crypto.randomUUID().replaceAll('-','');
    db.prepare('UPDATE app_members SET activation_hash=? WHERE id=?').run(await digest(code),id);
-   const activated=await req('/api/activate',null,{code});assert.equal(activated.status,200);assert.equal(activated.data.member.id,id);tokens[id]=activated.data.token;
+   assert.equal((await req('/api/activate',null,{code,memberId:id==='m1'?'m2':'m1'})).status,401);
+   const activated=await req('/api/activate',null,id==='m3'?{code}:{code,memberId:id});assert.equal(activated.status,200);assert.equal(activated.data.member.id,id);tokens[id]=activated.data.token;
    assert.equal((await req('/api/activate',null,{code})).status,401);
   }
   assert.equal((await req('/api/push/bind','m2',{spt:'SPT_test_member_two_only',member_id:'m1'})).status,200);
