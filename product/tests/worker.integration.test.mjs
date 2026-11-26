@@ -72,10 +72,17 @@ test('web entry points and cookie authentication are disabled',async()=>{
   assert.equal((await call('/api/state',{headers:{Cookie:'__Secure-qidong_session='+token}})).status,401);
   assert.equal((await call('/api/state',{headers:{Authorization:'Bearer '+token}})).status,200);
   for(const path of ['/app/','/app/sw.js','/api/web/session','/api/web/login','/api/web/activate'])assert.equal((await call(path)).status,404);
+  // Model a member who previously used a web session but has logged into APK with the same password.
   db.prepare("UPDATE app_sessions SET kind='web'").run();
+  const next=await call('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({memberId:'m1',password:code})});
+  assert.equal(next.status,200);
+  const android=(await next.json()).token;
   assert.equal((await call('/api/state',{headers:{Authorization:'Bearer '+token}})).status,401);
+  assert.equal((await call('/api/state',{headers:{Authorization:'Bearer '+android}})).status,200);
   db.exec(readFileSync(new URL('../worker/migrations/0007_remove_web_sessions.sql',import.meta.url),'utf8'));
-  assert.equal(db.prepare('SELECT count(*) AS n FROM app_sessions').get().n,0);
+  assert.equal(db.prepare("SELECT count(*) AS n FROM app_sessions WHERE kind='web'").get().n,0);
+  assert.equal(db.prepare("SELECT count(*) AS n FROM app_sessions WHERE kind='android'").get().n,1);
+  assert.equal((await call('/api/state',{headers:{Authorization:'Bearer '+android}})).status,200);
  }finally{db.close();}
 });
 

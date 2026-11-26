@@ -21,6 +21,7 @@ import { MessagesView } from './components/MessagesView';
 import { ScheduleEditor } from './components/ScheduleEditor';
 import { PushSettings, ReservationPanel, VersionSettings, WeeklyTemplate } from './features';
 import { createRefreshGate } from './refresh-gate.mjs';
+import { parseNativeLaunch } from './native-link.mjs';
 import {
   ApiError,
   apiRequest,
@@ -63,6 +64,9 @@ function AppMain() {
   const [nickname, setNickname] = useState('');
   const [nickNotice, setNickNotice] = useState('');
   const [focusInvite, setFocusInvite] = useState<string | null>(null);
+  const [inviteLoading, setInviteLoading] = useState(false);
+  const [inviteNotice, setInviteNotice] = useState('');
+  const launchSequence = useRef(0);
   const [focusReservation, setFocusReservation] = useState<string | null>(null);
   const [reservationNotice, setReservationNotice] = useState('');
   const [saveError, setSaveError] = useState<{ message: string; isConflict: boolean } | null>(null);
@@ -134,25 +138,25 @@ function AppMain() {
 
   const receive = useCallback(
     (raw: string) => {
-      try {
-        const u = new URL(raw);
-        if (u.protocol === 'qidongapp:' && u.hostname === 'game' && !u.search && !u.hash) {
-          if (/^\/[0-9a-f-]{36}$/.test(u.pathname)) {
-            setFocusReservation(null);
-            setReservationNotice('');
-            setFocusInvite(u.pathname.slice(1));
-            setPage('home');
-            void refresh();
-          } else if (['/schedule', '/messages', '/me'].includes(u.pathname)) {
-            setFocusInvite(null);
-            setFocusReservation(null);
-            setReservationNotice('');
-            setPage(u.pathname.slice(1) as Page);
-            void refresh();
-          }
-        }
-      } catch {
-        // Ignore invalid launch URLs
+      const launch = parseNativeLaunch(raw);
+      if (!launch) return;
+      const sequence = ++launchSequence.current;
+      setFocusReservation(null);
+      setReservationNotice('');
+      setInviteNotice('');
+      if (launch.kind === 'invite') {
+        setInviteLoading(true);
+        setFocusInvite(launch.id);
+        setPage('home');
+        // A newly received notification can refer to a ticket not yet in the current snapshot.
+        void refresh(true).finally(() => {
+          if (launchSequence.current === sequence) setInviteLoading(false);
+        });
+      } else {
+        setInviteLoading(false);
+        setFocusInvite(null);
+        setPage(launch.page);
+        void refresh();
       }
     },
     [refresh],
@@ -212,12 +216,19 @@ function AppMain() {
   }, [page]);
 
   useEffect(() => {
-    if (!snap || !focusInvite || page !== 'home') return;
+    if (!snap || !focusInvite || page !== 'home' || inviteLoading) return;
     const el = document.getElementById(`invite-${focusInvite}`);
-    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    else window.scrollTo({ top: 0, behavior: 'auto' });
+    if (el) {
+      const disclosure = el.closest('details');
+      if (disclosure) disclosure.open = true;
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    } else {
+      if (error) return; // retry on the next successful snapshot instead of discarding the deep link
+      setInviteNotice('这张车票已过期或不在当前列表中。');
+      window.scrollTo({ top: 0, behavior: 'auto' });
+    }
     setFocusInvite(null);
-  }, [focusInvite, page, snap]);
+  }, [focusInvite, page, snap, inviteLoading, error]);
 
   useEffect(() => {
     if (!snap || !focusReservation || page !== 'schedule') return;
@@ -541,6 +552,8 @@ function AppMain() {
         </div>
       )}
 
+      {page === 'home' && inviteNotice && <p role="status" className="helperText">{inviteNotice}</p>}
+
       {!snap ? (
         <section className="paper emptyState">
           <p className="emptyStateTitle">正在同步小队数据…</p>
@@ -637,12 +650,18 @@ function AppMain() {
               snap={snap}
               write={write}
               onJumpInvite={(inviteId) => {
+                ++launchSequence.current;
+                setInviteLoading(false);
+                setInviteNotice('');
                 setFocusReservation(null);
                 setReservationNotice('');
                 setFocusInvite(inviteId);
                 setPage('home');
               }}
               onJumpReservation={(reservationId) => {
+                ++launchSequence.current;
+                setInviteLoading(false);
+                setInviteNotice('');
                 setFocusInvite(null);
                 setReservationNotice('');
                 setFocusReservation(reservationId);
@@ -743,6 +762,9 @@ function AppMain() {
               className="bottomNavBtn"
               aria-current={isCurrent ? 'page' : undefined}
               onClick={() => {
+                ++launchSequence.current;
+                setInviteLoading(false);
+                setInviteNotice('');
                 setFocusInvite(null);
                 setFocusReservation(null);
                 setReservationNotice('');
