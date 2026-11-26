@@ -40,11 +40,9 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
-      - name: Check preinstalled Android SDK
-        run: |
-          echo "ANDROID_HOME=$ANDROID_HOME"
-          command -v sdkmanager
-          sdkmanager --version
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
       - run: npm install --no-audit --no-fund
       - run: npm test
       - run: npm run build
@@ -52,7 +50,6 @@ jobs:
           VITE_PROBE_API: ${{ vars.VITE_PROBE_API || 'https://qidongapp-probe.rainy256.workers.dev' }}
       - run: npx cap add android
       - run: python3 scripts/patch-android.py && npx cap sync android
-      - run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
       - run: cd android && ./gradlew assembleDebug --no-daemon
       - uses: actions/upload-artifact@v4
         with:
