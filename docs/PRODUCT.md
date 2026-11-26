@@ -40,3 +40,6 @@ Android Keystore AES-GCM 原生插件已编写，产品构建配置单独生成 
 正式自定义域名 qidongapp.apexdaishi.xyz 已绑定独立 qidongapp Worker；旧 workers.dev 入口保留供已安装 APK 使用。新 APK 默认 API 与新的通知链接使用自定义域名，网页使用同源 API。原 qidong Worker 和其两个域名不变。
 
 PWA 线上运行不再从 GitHub Raw 拉资源，改用专属 Cloudflare KV 绑定 PWA_ASSETS。构建流程导出公开资源的 Base64 分片到 pwa-static/transfer，部署时按清单写入 KV（index.html 最后写入）；仅公开静态资源，不包含身份、口令或 SPT。PWA 图像使用同一原图的压缩版本，APK 不变。
+
+## 长期口令与多设备（v0.1.2）
+新增迁移 0005_auth，不修改业务记录。已激活旧设备在我的账号设置中创建长期口令（至少16字符，推荐随机口令），成功后换发当前设备会话；未激活且已发放的旧口令可以在新版登录界面首次使用并自动成为长期口令。旧 APK 的激活入口保留兼容；已建立长期口令的用户通过新版登录。口令加盐 PBKDF2-SHA256，登录限流；会话各自独立，365天有效，可注销任意本人会话，修改口令撤销旧会话。忘记口令且无可用登录时仍需管理员安全重置。SPT 仍每成员共享一个绑定，不按设备重复发通知。

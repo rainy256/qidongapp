@@ -1,4 +1,5 @@
-import {pwaStatic,pwaLanding,webCookie,sessionCookie,validWebWrite} from './pwa.mjs';
+import {pwaStatic,pwaLanding,sessionCookie,validWebWrite} from './pwa.mjs';
+import {authenticate,login,account,allowAttempt} from './auth.mjs';
 import {MEMBER_IDS,REPLIES,GAMES,normalizeSchedule,replyColumn,mutationValid,secretValid,digest,newToken,inviteView} from './logic.mjs';
 import {latestVersion} from './version.mjs';
 import {encryptSpt,validSpt} from './spt.mjs';
@@ -9,13 +10,6 @@ const HEADERS={'Content-Type':'application/json; charset=utf-8','Cache-Control':
 const json=(value,status=200)=>new Response(JSON.stringify(value),{status,headers:HEADERS});
 const publicInvite='id,creator,game,title,created_at,expires_at,revision,r1,r2,r3';
 async function body(req){try{const s=await req.text();if(s.length>20000)return null;return JSON.parse(s);}catch{return null;}}
-async function authenticate(req,env){
- const auth=req.headers.get('Authorization')||'';
- const token=auth?auth.startsWith('Bearer ')?auth.slice(7):'':webCookie(req);
- if(!secretValid(token))return null;
- if(!auth&&req.method!=='GET'&&!validWebWrite(req))return null;
- return env.DB.prepare('SELECT id,nickname FROM app_members WHERE token_hash=?').bind(await digest(token)).first();
-}
 export default {async fetch(req,env,ctx){
  const u=new URL(req.url),path=u.pathname,now=Date.now();
  const kick=()=>ctx.waitUntil(drainPush(env).catch(()=>{}));
@@ -27,17 +21,20 @@ export default {async fetch(req,env,ctx){
  if(req.method==='OPTIONS')return new Response(null,{status:204,headers:HEADERS});
  if(path==='/api/health'&&req.method==='GET')return json({ok:true,stage:'product-foundation'});
  try{
+  if((path==='/api/login'||path==='/api/web/login')&&req.method==='POST')return login(req,env,await body(req),now,json,HEADERS);
   if((path==='/api/activate'||path==='/api/web/activate')&&req.method==='POST'){
    const web=path==='/api/web/activate';if(web&&!validWebWrite(req))return json({error:'invalid_origin'},403);
-   if(web&&await authenticate(req,env))return json({error:'already_activated'},409);
+   if(web&&await authenticate(req,env,now))return json({error:'already_activated'},409);
    const b=await body(req);if(!secretValid(b?.code)||(b.memberId!==undefined&&!MEMBER_IDS.includes(b.memberId)))return json({error:'invalid_activation'},401);
+   if(!await allowAttempt(env,'legacy:'+(b.memberId??'unknown'),now,30))return json({error:'rate_limited'},429);
    const token=newToken();
    const member=await env.DB.prepare('UPDATE app_members SET activation_hash=NULL,token_hash=?,activated_at=?,last_seen=? WHERE activation_hash=? AND activated_at IS NULL AND (? IS NULL OR id=?) RETURNING id,nickname').bind(await digest(token),now,now,await digest(b.code),b.memberId??null,b.memberId??null).first();
    if(!member)return json({error:'invalid_activation'},401);
    if(web){const headers=new Headers(HEADERS);headers.set('Set-Cookie',sessionCookie(token));return new Response(JSON.stringify({member}),{headers});}
    return json({member,token});
   }
-  const me=await authenticate(req,env);if(!me)return json({error:'unauthorized'},401);
+  const auth=await authenticate(req,env,now);if(!auth)return json({error:'unauthorized'},401);const me=auth.member;
+  if(path==='/api/account'||path.startsWith('/api/account/'))return account(req,env,auth,req.method==='POST'?await body(req):null,now,json,HEADERS);
   if(path==='/api/web/session'&&req.method==='GET')return json({member:me});
   if(path==='/api/version'&&req.method==='GET'){try{return json(await latestVersion());}catch{return json({error:'version_unavailable'},503);}}
   if(path==='/api/push'&&req.method==='GET'){

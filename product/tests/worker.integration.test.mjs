@@ -78,3 +78,35 @@ test('PWA cookie activation, session isolation and CSRF rejection',async()=>{
   assert.equal(db.prepare('SELECT nickname FROM app_members WHERE id=?').get('m1').nickname,'网页版测试');
  }finally{db.close();}
 });
+
+test('reusable login, legacy setup, sessions and credential rotation',async()=>{
+ const {db,env}=setup(),origin='https://qidongapp.example';
+ const old=crypto.randomUUID().replaceAll('-',''),p1='long-test-password-one-123',p2='long-test-password-two-456';
+ db.prepare('UPDATE app_members SET activation_hash=? WHERE id=?').run(await digest(old),'m1');
+ const call=async(path,body,token,cookie,otherOrigin)=>{const r=await worker.fetch(new Request(origin+path,{method:body===undefined?'GET':'POST',headers:{...(body!==undefined?{'Content-Type':'application/json',Origin:otherOrigin||origin}:{}),...(token?{Authorization:'Bearer '+token}:{}),...(cookie?{Cookie:cookie}:{})},...(body===undefined?{}:{body:JSON.stringify(body)})}),env,{waitUntil(){}});return {status:r.status,data:await r.json(),cookie:r.headers.get('set-cookie')?.split(';')[0]};};
+ try{
+  const first=await call('/api/login',{memberId:'m1',password:old});assert.equal(first.status,200);
+  const second=await call('/api/web/login',{memberId:'m1',password:old});assert.equal(second.status,200);assert.equal(second.data.token,undefined);
+  assert.equal((await call('/api/state',undefined,first.data.token)).status,200);
+  assert.equal((await call('/api/state',undefined,null,second.cookie)).status,200);
+  const acc=await call('/api/account',undefined,first.data.token);assert.equal(acc.data.sessions.length,2);
+  assert.equal((await call('/api/account/revoke',{id:acc.data.sessions.find(x=>x.id!==acc.data.currentSession).id},first.data.token)).status,200);
+  assert.equal((await call('/api/state',undefined,null,second.cookie)).status,401);
+  const change=await call('/api/account/password',{currentPassword:old,password:p1},first.data.token);assert.equal(change.status,200);
+  assert.equal((await call('/api/state',undefined,first.data.token)).status,401);
+  assert.equal((await call('/api/login',{memberId:'m1',password:old})).status,401);
+  const fresh=await call('/api/login',{memberId:'m1',password:p1});assert.equal(fresh.status,200);
+  assert.equal((await call('/api/login',{memberId:'m2',password:p1})).status,401);
+  const other=await call('/api/web/login',{memberId:'m1',password:p1},null,null,'https://bad.example');assert.equal(other.status,403);
+  const legacy=crypto.randomUUID().replaceAll('-','');db.prepare('UPDATE app_members SET activation_hash=? WHERE id=?').run(await digest(legacy),'m2');
+  const l=await call('/api/activate',{memberId:'m2',code:legacy});assert.equal(l.status,200);
+  const init=await call('/api/account/password',{password:p2},l.data.token);assert.equal(init.status,200);
+  assert.equal((await call('/api/state',undefined,l.data.token)).status,401);
+  const login2=await call('/api/login',{memberId:'m2',password:p2});assert.equal(login2.status,200);
+  assert.equal((await call('/api/account/revoke',{id:(await call('/api/account',undefined,fresh.data.token)).data.currentSession},login2.data.token)).status,200);
+  assert.equal((await call('/api/state',undefined,fresh.data.token)).status,200);
+  assert.equal((await call('/api/account/logout',{},login2.data.token)).status,200);
+  assert.equal((await call('/api/state',undefined,login2.data.token)).status,401);
+  for(let i=0;i<12;i++){const r=await call('/api/login',{memberId:'m3',password:p1});if(i===11)assert.equal(r.status,429);}
+ }finally{db.close();}
+});
