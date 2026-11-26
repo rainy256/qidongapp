@@ -19,3 +19,8 @@ Android Keystore AES-GCM 原生插件已编写，产品构建配置单独生成 
 管理员在 Cloudflare D1 控制台为 m1/m2/m3 单独写入高熵一次性激活码的 SHA256 哈希（明文仅私下交给本人）。未激活身份不可使用正式 API。通过正式 Worker Secret 配置 SPT_ENCRYPTION_KEY，值为 32 字节随机数据的 64 位十六进制形式（例如本地 openssl rand -hex 32，妥善备份，不要将实际值提交）。App 内各人自行绑定 SPT，测试推送并确认实际收到。原 probe SPT 不自动迁移。更换密钥前须安排密文迁移，不可直接覆盖。 
 
 激活码本地生成：`node product/scripts/issue-activation.mjs m1`（m2、m3 同理），仅将打印的 SQL 执行于正式 D1，并将明文单独发给对应成员。脚本不会连接云端，不得把输出作为 CI artifact 或提交至 Git。
+
+## Windows 一键签名配置
+安装 JDK 21 和 GitHub CLI，使用自己的 GitHub 管理员账号运行 `powershell -File product/scripts/setup-signing.ps1`（按本机 PowerShell 策略允许已审查的本地脚本）。脚本仅在四项签名 Secrets 均不存在时配置首次发布，若已存在则拒绝覆盖。密钥默认保存在用户目录 qidongapp-signing，密码由本人设置，不写入代码。脚本若中途失败，请保留本地 JKS，核对已有 Secrets 后补齐，禁止生成替换密钥。脚本仅验证 Secret 名称，真实签名以发布工作流为准。
+
+用户确认探针延时提醒已收到；鸿蒙7可原生运行 WxPusher，无需用卓易通运行 WxPusher。qidongapp APK 在鸿蒙7自身安装、跳转仍需验收。
