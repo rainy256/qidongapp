@@ -117,3 +117,39 @@ test('reusable login, legacy setup, sessions and credential rotation',async()=>{
   for(let i=0;i<12;i++){const r=await call('/api/login',{memberId:'m3',password:p1});if(i===11)assert.equal(r.status,429);}
  }finally{db.close();}
 });
+
+test('availability and arrival promises persist without duplicate notifications',async()=>{
+ const {db,env}=setup(),tokens={m1:'a'.repeat(40),m2:'b'.repeat(40),m3:'c'.repeat(40)};
+ try{
+  for(const id of ['m1','m2','m3'])db.prepare('UPDATE app_members SET token_hash=? WHERE id=?').run(await digest(tokens[id]),id);
+  async function req(path,who,input){
+   const pending=[];const res=await worker.fetch(new Request('https://qidongapp.example'+path,{method:input===undefined?'GET':'POST',headers:{Authorization:'Bearer '+tokens[who],...(input===undefined?{}:{'Content-Type':'application/json'})},...(input===undefined?{}:{body:JSON.stringify(input)})}),env,{waitUntil(p){pending.push(p);}});
+   const data=await res.json();await Promise.all(pending);return {status:res.status,data};
+  }
+  const av={choice:'1h',revision:0,mutation:mut(),memberId:'m3'};
+  const first=await req('/api/availability','m2',av);assert.equal(first.status,200);assert.equal(first.data.available_until,first.data.now+3600000);
+  assert.equal((await req('/api/availability','m2',av)).data.available_until,first.data.available_until);
+  const state=await req('/api/state','m1');assert.equal(state.data.members[1].available_until,first.data.available_until);assert.equal(state.data.members[2].available_until,null);
+  assert.equal(db.prepare('SELECT count(*) AS n FROM app_push_jobs').get().n,0);
+  assert.equal((await req('/api/availability','m2',{...av,mutation:mut()})).status,409);
+  const extend=await req('/api/availability','m2',{choice:'2h',revision:1,mutation:mut()});assert.equal(extend.data.available_until,first.data.available_until+7200000);
+  assert.equal((await req('/api/availability','m2',{choice:'end',revision:2,mutation:mut()})).data.available_until,null);
+  db.prepare('UPDATE app_members SET available_until=? WHERE id=?').run(Date.now()-1000,'m2');
+  assert.equal((await req('/api/state','m3')).data.members[1].available_until,null);
+  assert.equal((await req('/api/state','m1')).data.features.rebook,false);
+  env.ENABLE_REBOOKING='true';assert.equal((await req('/api/state','m1')).data.features.rebook,true);
+  const inv=(await req('/api/invites','m1',{game:'apex',mutation:mut()})).data.invite;
+  const path='/api/invites/'+inv.id+'/reply',reply={reply:'10',revision:1,mutation:mut()};
+  const before=Date.now(),wait=await req(path,'m2',reply);assert.equal(wait.status,200);
+  const eta=wait.data.invite.r2_eta;assert.ok(eta>=before+600000&&eta<=Date.now()+600000);
+  assert.equal((await req(path,'m2',reply)).data.invite.r2_eta,eta);
+  assert.equal((await req('/api/state','m3')).data.invites[0].r2_eta,eta);
+  const jobs=()=>db.prepare("SELECT member_id,status,due_at FROM app_push_jobs WHERE kind='arrival' ORDER BY due_at DESC").all();
+  assert.deepEqual(jobs().map(x=>[x.member_id,x.status,x.due_at]),[['m2','queued',eta]]);
+  const next=await req(path,'m2',{reply:'5',revision:2,mutation:mut()});assert.equal(next.status,200);assert.equal(jobs().filter(x=>x.status==='queued').length,1);assert.equal(jobs().filter(x=>x.status==='expired').length,1);
+  const ready=await req(path,'m2',{reply:'ready',revision:3,mutation:mut()});assert.equal(ready.data.invite.r2_eta,null);assert.equal(jobs().filter(x=>x.status==='queued').length,0);
+  const tooLate=await req(path,'m3',{reply:'30',revision:4,mutation:mut()});assert.equal(tooLate.status,200);assert.ok(tooLate.data.invite.r3_eta>=inv.expires_at);assert.equal(jobs().filter(x=>x.status==='queued').length,0);
+  db.prepare("UPDATE app_invites SET r3_eta=NULL WHERE id=?").run(inv.id);
+  assert.equal((await req('/api/state','m1')).data.invites[0].r3,'30');assert.equal((await req('/api/state','m1')).data.invites[0].r3_eta,null);
+ }finally{db.close();}
+});
