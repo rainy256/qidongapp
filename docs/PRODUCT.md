@@ -34,18 +34,21 @@ Android Keystore AES-GCM 原生插件已编写，产品构建配置单独生成 
 ## 成员激活界面（待下一次 APK 发布）
 新界面先选固定成员，再粘贴本人专属一次性口令；服务器同时核验成员与口令匹配，兼容旧 APK 无 memberId 的请求。管理员本地签发工具生成 128 位随机口令（32 个十六进制字符），无需改数据库结构。现有 64 字符口令仍兼容；数据库只保存 SHA-256。签发及 SPT 加密密钥配置必须由有权限的管理员在安全环境完成，此提交不写入任何真实口令或密钥，不重置已激活成员。
 
-## 鸿蒙 PWA
-独立地址 `https://qidongapp.apexdaishi.xyz/app/`，由同一正式 Worker 提供入口与 API。GitHub Actions `Publish PWA static build` 构建至 `dist-pwa` 并发布独立 `pwa-static` 分支；Worker 仅向固定公开分支读取白名单静态文件，不转发认证头或 Cookie，不依赖浏览器直连 GitHub。APK 构建保持原路径。网页激活用 HttpOnly/Secure/SameSite=Strict Cookie（API 路径），写操作必须同源 JSON；旧 APK 仍用原 Bearer。通知入口可选择网页或 APK。PWA 清除浏览器数据可能需要管理员重新授权；同一成员仍为单设备授权，尚无多设备绑定。Service Worker 只缓存离线提示，不缓存私人数据，联网方可约局。鸿蒙浏览器是否支持独立窗口/桌面安装需真机确认。签发口令与 SPT 加密密钥仍需安全初始化，不由网页公开配置。
-
-正式自定义域名 qidongapp.apexdaishi.xyz 已绑定独立 qidongapp Worker；旧 workers.dev 入口保留供已安装 APK 使用。新 APK 默认 API 与新的通知链接使用自定义域名，网页使用同源 API。原 qidong Worker 和其两个域名不变。
-
-PWA 线上运行不再从 GitHub Raw 拉资源，改用专属 Cloudflare KV 绑定 PWA_ASSETS。构建流程导出公开资源的 Base64 分片到 pwa-static/transfer，部署时按清单写入 KV（index.html 最后写入）；仅公开静态资源，不包含身份、口令或 SPT。PWA 图像使用同一原图的压缩版本，APK 不变。
+## APK-only 运行
+正式应用仅维护 Android APK，鸿蒙设备使用可运行 APK 的兼容环境。通知 HTTPS 链接保留一个不含业务数据的 APK 跳转页，不提供网页应用或网页登录。Worker API 使用 Bearer 凭证。旧 APK 的 API 域名、登录和推送保持兼容；原 qidong Worker 和旧站路由不变。
 
 ## 长期口令与多设备（v0.1.2）
 新增迁移 0005_auth，不修改业务记录。已激活旧设备在我的账号设置中创建长期口令（至少16字符，推荐随机口令），成功后换发当前设备会话；未激活且已发放的旧口令可以在新版登录界面首次使用并自动成为长期口令。旧 APK 的激活入口保留兼容；已建立长期口令的用户通过新版登录。口令加盐 PBKDF2-SHA256，登录限流；会话各自独立，365天有效，可注销任意本人会话，修改口令撤销旧会话。忘记口令且无可用登录时仍需管理员安全重置。SPT 仍每成员共享一个绑定，不按设备重复发通知。
 
 ## APK 国内直连入口
-用户实际测试确认 `https://qidong.apexdaishi.xyz/app-api/health` 无代理可访问。独立 Worker `qidongapp-api-entry` 仅匹配 `qidong.apexdaishi.xyz/app-api/*`，使用 service binding APP 调用 qidongapp，剥除旧网站 Cookie，不改变旧站的代码、数据库、其他路由。APK 默认使用此入口，包括账号、推送和版本检查。PWA 仍同源访问原独立子域名，避免与旧站 Cookie 共用。旧 API 域名保持兼容。
+用户实际测试确认 `https://qidong.apexdaishi.xyz/app-api/health` 无代理可访问。独立 Worker `qidongapp-api-entry` 仅匹配 `qidong.apexdaishi.xyz/app-api/*`，使用 service binding APP 调用 qidongapp，剥除旧网站 Cookie，不改变旧站的代码、数据库、其他路由。APK 默认使用此入口，包括账号、推送和版本检查。旧 API 域名保持兼容。
 
 ## v0.1.3 前端优化候选版
-基于用户提供的 ui-refined 源码：窄容器仅显示未来的两人及以上重合区间，左右各补一格，合并相邻扩展区间，按实际宽度每行最多12格；恢复原版紫色渐变、错峰星星、流光、午夜标记。点击格子查看人数及成员，剩余完整时间轴折叠展开后同样分行。宽容器继续使用原版 DensityBar。快捷时段忽略已过去的时间；保存保留已过去的原日程，不覆盖其他设备并发修改。后端、签名和 API 入口不变。发布前运行完整 npm test:product、npm run build:product、npm run build:pwa 及签名发布工作流。
+基于用户提供的 ui-refined 源码：窄容器仅显示未来的两人及以上重合区间，左右各补一格，合并相邻扩展区间，按实际宽度每行最多12格；恢复原版紫色渐变、错峰星星、流光、午夜标记。点击格子查看人数及成员，剩余完整时间轴折叠展开后同样分行。宽容器继续使用原版 DensityBar。快捷时段忽略已过去的时间；保存保留已过去的原日程，不覆盖其他设备并发修改。后端、签名和 API 入口不变。发布前运行完整 npm test:product、npm run build:product 及签名发布工作流。
+
+## APK-only 修复与部署
+- 状态读取采用同会话单飞、请求完成后轮询；写操作完成后重新获取新快照。
+- 日程未填写与明确整周没空分开显示；明确没空保存为七天单日覆盖，窗口滚动后未确认的新日期不视为拒绝。
+- 0006 恢复升级周模板前的绝对日程覆盖；0007 仅清理已废弃的网页会话，不动 APK 凭证及业务数据。
+- 预约消息跳转到指定预约卡片；旧消息无对应预约时显示提示。
+- 移除网页静态构建与发布流程。部署前备份正式 D1，按编号应用新增迁移，再部署正式 Worker；不修改旧 qidong 站点。确认 APK 登录及通知正常后，可由管理员清理正式 Worker 的闲置静态 KV 绑定、旧网页静态分支及已安装网页快捷方式。保留通知跳转域名和 API 入口，不删除正式 D1、密钥或签名。

@@ -1009,33 +1009,9 @@
   color: var(--ink-primary);
 }
 
-/* PWA install panel */
-.pwaInstall {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 16px;
-  border: 1.5px solid var(--border-hairline);
-  border-radius: var(--radius-card);
-  background: var(--bg-surface);
-  box-shadow: var(--shadow-subtle);
-}
-
-.pwaInstall button {
-  min-block-size: 44px;
-  border-radius: var(--radius-control);
-  border: 1.5px solid var(--border-control);
-  background: var(--bg-input);
-  padding: 10px 14px;
-  font-weight: 700;
-}
-
-.pwaInstall button.primary {
-  background: var(--brand-solid);
-  color: var(--brand-ink-on-solid);
-  border: 0;
-  box-shadow: 0 3px 0 var(--brand-lip);
-}
+/* Reservation message deep links */
+#reservations, .reservationCard { scroll-margin-top: 76px; }
+.reservationCard:focus { outline: 2px solid var(--brand-solid); outline-offset: 2px; }
 
 /* Bottom navigation bar */
 .bottomNav {

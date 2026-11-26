@@ -3,7 +3,7 @@ import { Bell, CalendarCheck2, Check, ChevronDown, Download, Plus, RefreshCw, Tr
 import { formatNightShort, formatSlotInNight, slotToShanghaiParts } from '../src/original/domain/time';
 import type { Candidate, GameTag } from '../src/original/domain/types';
 import { ConfirmDialog } from './components/ConfirmDialog';
-import { apiEndpoint, fetchWithTimeout, webAuth } from './pwa/client';
+import { apiEndpoint, fetchWithTimeout, bearerAuth } from './http';
 import {
   GAME_LABELS,
   formatSlotStamp,
@@ -54,7 +54,7 @@ export function PushSettings({ token, apiBase }: { token: string; apiBase: strin
     const res = await fetchWithTimeout(apiEndpoint(apiBase, path), {
       method: body ? 'POST' : 'GET',
       headers: {
-        ...webAuth(token),
+        ...bearerAuth(token),
         ...(body ? { 'Content-Type': 'application/json' } : {}),
       },
       ...(body ? { body: JSON.stringify(body) } : {}),
@@ -309,6 +309,7 @@ type ReservationProps = {
   me: string;
   members: { id: string; nickname: string }[];
   reservations: Reservation[];
+  notice: string;
   game: GameTag;
   custom: string;
   candidates: Candidate[];
@@ -321,6 +322,7 @@ export function ReservationPanel({
   me,
   members,
   reservations,
+  notice,
   game,
   custom,
   candidates,
@@ -381,7 +383,7 @@ export function ReservationPanel({
   }
 
   return (
-    <section className="paper">
+    <section id="reservations" className="paper">
       <div className="cardHeaderRow">
         <h2 className="sectionHeading">提前预约</h2>
         <span className="badgeSoft">
@@ -390,6 +392,7 @@ export function ReservationPanel({
         </span>
       </div>
       <p className="helperText">三人均须确认，未取消的预约时间不可重叠。</p>
+      {notice && <p role="status" className="helperText">{notice}</p>}
 
       {candidates.length > 0 && (
         <div className="quickChipRow">
@@ -518,7 +521,7 @@ export function ReservationPanel({
             const myConfirmed = Boolean(me === 'm1' ? r.r1 : me === 'm2' ? r.r2 : r.r3);
             const canAct = r.state !== 'cancelled' && r.from_slot * 1800000 > now;
             return (
-              <div className="subCard" key={r.id}>
+              <div id={`reservation-${r.id}`} className="subCard reservationCard" key={r.id} tabIndex={-1}>
                 <div className="cardHeaderRow">
                   <strong className="subCardTitle">{r.title}</strong>
                   <span

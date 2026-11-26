@@ -37,10 +37,11 @@ type DraftSegment = {
 
 type ScheduleEditorProps = Readonly<{
   snapshot: RoomSnapshot;
+  explicitlyUnavailable: boolean;
   earliestStart: Slot;
   isSaving: boolean;
   saveError: { message: string; isConflict: boolean } | null;
-  onSave: (answer: Answer, revision: number) => Promise<boolean>;
+  onSave: (answer: Answer, revision: number, unavailable: boolean) => Promise<boolean>;
   onRefreshLatest: () => Promise<boolean>;
   onClearError: () => void;
 }>;
@@ -94,6 +95,7 @@ function pickInitialNightId(snapshot: RoomSnapshot, earliestStart: Slot): string
 
 export function ScheduleEditor({
   snapshot,
+  explicitlyUnavailable,
   earliestStart,
   isSaving,
   saveError,
@@ -113,11 +115,11 @@ export function ScheduleEditor({
     pickInitialNightId(snapshot, earliestStart),
   );
   const [isEditing, setIsEditing] = useState<boolean>(
-    !mySubmission || mySubmission.answer.kind === 'unavailable',
+    !mySubmission,
   );
   const [isDirty, setIsDirty] = useState<boolean>(false);
   const [draftMode, setDraftMode] = useState<'available' | 'unavailable'>(
-    mySubmission?.answer.kind === 'unavailable' ? 'unavailable' : 'available',
+    explicitlyUnavailable || mySubmission?.answer.kind === 'unavailable' ? 'unavailable' : 'available',
   );
   const [draftByNight, setDraftByNight] = useState<Record<string, DraftSegment[]>>(() =>
     buildDraftMap(
@@ -140,8 +142,8 @@ export function ScheduleEditor({
       setActiveNightId(pickInitialNightId(snapshot, earliestStart));
       setIsDirty(false);
       setValidationMsg(null);
-      setIsEditing(!mySubmission || mySubmission.answer.kind === 'unavailable');
-      setDraftMode(mySubmission?.answer.kind === 'unavailable' ? 'unavailable' : 'available');
+      setIsEditing(!mySubmission);
+      setDraftMode(explicitlyUnavailable || mySubmission?.answer.kind === 'unavailable' ? 'unavailable' : 'available');
       setDraftByNight(
         buildDraftMap(
           snapshot.nights,
@@ -153,7 +155,7 @@ export function ScheduleEditor({
 
     if (!isDirty) {
       draftRevision.current = null;
-      setDraftMode(mySubmission?.answer.kind === 'unavailable' ? 'unavailable' : 'available');
+      setDraftMode(explicitlyUnavailable || mySubmission?.answer.kind === 'unavailable' ? 'unavailable' : 'available');
       setDraftByNight(
         buildDraftMap(
           snapshot.nights,
@@ -164,7 +166,7 @@ export function ScheduleEditor({
         setActiveNightId(snapshot.nights[0]?.id ?? '');
       }
     }
-  }, [activeNightId, earliestStart, identityKey, isDirty, lastIdentity, mySubmission, snapshot]);
+  }, [activeNightId, earliestStart, explicitlyUnavailable, identityKey, isDirty, lastIdentity, mySubmission, snapshot]);
 
   const activeNight =
     snapshot.nights.find((n) => n.id === activeNightId) ?? snapshot.nights[0] ?? null;
@@ -345,7 +347,7 @@ export function ScheduleEditor({
     setIsDirty(false);
     setValidationMsg(null);
     onClearError();
-    setDraftMode(mySubmission?.answer.kind === 'unavailable' ? 'unavailable' : 'available');
+    setDraftMode(explicitlyUnavailable || mySubmission?.answer.kind === 'unavailable' ? 'unavailable' : 'available');
     setDraftByNight(
       buildDraftMap(
         snapshot.nights,
@@ -374,7 +376,7 @@ export function ScheduleEditor({
       return;
     }
     const answer: Answer = normalized.length ? { kind: 'available', picks: normalized } : { kind: 'unavailable' };
-    const ok = await onSave(answer, draftRevision.current ?? snapshot.viewer.mineRevision);
+    const ok = await onSave(answer, draftRevision.current ?? snapshot.viewer.mineRevision, draftMode === 'unavailable');
     if (ok) {
       draftRevision.current = null;
       setIsDirty(false);
@@ -445,7 +447,7 @@ export function ScheduleEditor({
               <h2 className={styles.sectionTitle}>我的未来七天空闲</h2>
             </div>
             <p className={`${styles.savedLine} tabular`}>
-              {remaining.length ? formatMemberAvailabilityLines({ ...mySubmission, answer: { kind: 'available', picks: remaining } }, snapshot.nights) : '暂无未来空闲时间'}
+              {remaining.length ? formatMemberAvailabilityLines({ ...mySubmission, answer: { kind: 'available', picks: remaining } }, snapshot.nights) : explicitlyUnavailable || mySubmission.answer.kind === 'unavailable' ? '已确认未来七天都没空' : '暂无未来空闲时间'}
             </p>
             <p className={styles.browserHint}>已同步给小队成员，随时可调整单日时段。</p>
           </div>
@@ -487,14 +489,15 @@ export function ScheduleEditor({
     <div className="scheduleEditorWrap">
       <section id="time-picker" className={styles.card} aria-label="编辑未来七天空闲">
         <div className={styles.editorHeader}>
-          <h2 className={styles.sectionTitle}>编辑未来七天空闲</h2>
-          {mySubmission && mySubmission.answer.kind === 'available' && (
+          <h2 className={styles.sectionTitle}>{mySubmission ? '编辑未来七天空闲' : '你这周什么时候能玩？'}</h2>
+          {mySubmission && (
             <button type="button" className={styles.textAction} onClick={cancelEditing}>
               取消
             </button>
           )}
         </div>
 
+        {!mySubmission && <p className={styles.browserHint}>还未确认空闲时间，选择日期和时段，或明确标记都没空。</p>}
         {renderDayTabs()}
 
         {draftMode === 'available' && (
@@ -526,7 +529,7 @@ export function ScheduleEditor({
         {draftMode === 'unavailable' ? (
           <div className={styles.unavailableBox}>
             <div>
-              <p className={styles.unavailableTitle}>已标记「未来七天都没空」</p>
+              <p className={styles.unavailableTitle}>{isDirty ? '待确认「未来七天都没空」' : '已标记「未来七天都没空」'}</p>
               <p className={styles.unavailableHint}>之前选过的时间已保留，点右侧随时恢复。</p>
             </div>
             <button type="button" className={styles.undoBtn} onClick={toggleUnavailable}>

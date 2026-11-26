@@ -3,7 +3,6 @@ import { Bell, CalendarClock, Gamepad2, Megaphone } from 'lucide-react';
 import {
   REPLY_LABELS,
   formatTimestamp,
-  type Page,
   type Snapshot,
   type WriteFn,
 } from '../types';
@@ -12,7 +11,7 @@ type MessagesViewProps = Readonly<{
   snap: Snapshot;
   write: WriteFn;
   onJumpInvite: (inviteId: string) => void;
-  onJumpPage: (page: Page) => void;
+  onJumpReservation: (reservationId: string) => void;
 }>;
 
 type TimelineItem =
@@ -44,7 +43,7 @@ type TimelineItem =
       onOpen: () => void;
     };
 
-export function MessagesView({ snap, write, onJumpInvite, onJumpPage }: MessagesViewProps) {
+export function MessagesView({ snap, write, onJumpInvite, onJumpReservation }: MessagesViewProps) {
   const items = useMemo<TimelineItem[]>(() => {
     const memberName = (id: string) => snap.members.find((x) => x.id === id)?.nickname || '队友';
 
@@ -73,7 +72,7 @@ export function MessagesView({ snap, write, onJumpInvite, onJumpPage }: Messages
       subtitle: m.detail,
       onOpen: () => {
         if (!m.read_at) void write('/api/reservation-messages/read', { id: m.id });
-        onJumpPage('schedule');
+        onJumpReservation(m.reservation_id);
       },
     }));
 
@@ -90,7 +89,7 @@ export function MessagesView({ snap, write, onJumpInvite, onJumpPage }: Messages
     }));
 
     return [...inviteMsgs, ...resMsgs, ...nudgeMsgs].sort((a, b) => b.createdAt - a.createdAt);
-  }, [snap.messages, snap.reservationMessages, snap.nudges, snap.members, write, onJumpInvite, onJumpPage]);
+  }, [snap.messages, snap.reservationMessages, snap.nudges, snap.members, write, onJumpInvite, onJumpReservation]);
 
   const unreadCount = items.filter((i) => i.unread).length;
 

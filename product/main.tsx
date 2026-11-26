@@ -11,7 +11,7 @@ import {
   formatSlotInNight,
   slotToShanghaiParts,
 } from '../src/original/domain/time';
-import type { Answer, GameTag, Night, RoomSnapshot } from '../src/original/domain/types';
+import type { Answer, GameTag, Night, RoomSnapshot, Submission } from '../src/original/domain/types';
 import '../src/original/styles/tokens.css';
 import '../src/original/styles/global.css';
 import './product.css';
@@ -20,13 +20,7 @@ import { HomeView } from './components/HomeView';
 import { MessagesView } from './components/MessagesView';
 import { ScheduleEditor } from './components/ScheduleEditor';
 import { PushSettings, ReservationPanel, VersionSettings, WeeklyTemplate } from './features';
-import {
-  InstallPanel,
-  fetchWithTimeout,
-  isPwa,
-  readLaunch,
-  registerPwa,
-} from './pwa/client';
+import { createRefreshGate } from './refresh-gate.mjs';
 import {
   ApiError,
   apiRequest,
@@ -36,9 +30,7 @@ import {
   type WriteFn,
 } from './types';
 
-const apiBase = isPwa
-  ? ''
-  : (import.meta.env.VITE_APP_API || 'https://qidong.apexdaishi.xyz/app-api').replace(/\/$/, '');
+const apiBase = (import.meta.env.VITE_APP_API || 'https://qidong.apexdaishi.xyz/app-api').replace(/\/$/, '');
 
 const SecureSession = registerPlugin<{
   get(): Promise<{ token?: string }>;
@@ -71,9 +63,12 @@ function AppMain() {
   const [nickname, setNickname] = useState('');
   const [nickNotice, setNickNotice] = useState('');
   const [focusInvite, setFocusInvite] = useState<string | null>(null);
+  const [focusReservation, setFocusReservation] = useState<string | null>(null);
+  const [reservationNotice, setReservationNotice] = useState('');
   const [saveError, setSaveError] = useState<{ message: string; isConflict: boolean } | null>(null);
 
-  const requestSerial = useRef(0);
+  const requestSerial = useRef(0); // session generation, not polling generation
+  const refreshGate = useRef(createRefreshGate());
   const session = useRef<string | null>(null);
   const pending = useRef<{ key: string; id: string } | null>(null);
   const actionLock = useRef(false);
@@ -83,17 +78,7 @@ function AppMain() {
     let gone = false;
     (async () => {
       try {
-        if (isPwa) {
-          const r = await fetchWithTimeout('/api/web/session', { cache: 'no-store' });
-          if (r.ok) {
-            if (!gone) {
-              session.current = 'web';
-              setToken('web');
-            }
-          } else if (r.status !== 401) {
-            throw Error('session_unavailable');
-          }
-        } else if (Capacitor.isNativePlatform()) {
+        if (Capacitor.isNativePlatform()) {
           const r = await SecureSession.get();
           if (!gone && r.token) {
             session.current = r.token;
@@ -103,9 +88,7 @@ function AppMain() {
       } catch {
         if (!gone) {
           setBootFailed(true);
-          setError(
-            isPwa ? '无法检查登录状态，请联网后重试。' : '安全存储无法读取，请联系管理员。',
-          );
+          setError('安全存储无法读取，请联系管理员。');
         }
       } finally {
         if (!gone) setInitial(false);
@@ -116,10 +99,12 @@ function AppMain() {
     };
   }, [bootRetry]);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (afterCurrent = false): Promise<boolean> => {
     const t = session.current;
     if (!t) return false;
-    const id = ++requestSerial.current;
+    const id = requestSerial.current;
+    return refreshGate.current.run(id, async () => {
+    if (id !== requestSerial.current || session.current !== t) return false;
     try {
       const data = await apiRequest<Snapshot>(apiBase, '/api/state', t);
       if (id !== requestSerial.current || session.current !== t) return false;
@@ -129,12 +114,13 @@ function AppMain() {
     } catch (e) {
       if (id !== requestSerial.current || session.current !== t) return false;
       if (e instanceof ApiError && e.status === 401) {
+        requestSerial.current++;
         session.current = null;
         setToken(null);
         setSnap(null);
         setNickname('');
         lastServerNickname.current = '';
-        if (!isPwa && Capacitor.isNativePlatform()) {
+        if (Capacitor.isNativePlatform()) {
           void SecureSession.clear().catch(() => {});
         }
         setError('登录状态已失效，请使用个人口令重新登录。');
@@ -143,6 +129,7 @@ function AppMain() {
       setError(formatErrorMessage(e));
       return false;
     }
+    }, afterCurrent);
   }, []);
 
   const receive = useCallback(
@@ -151,10 +138,15 @@ function AppMain() {
         const u = new URL(raw);
         if (u.protocol === 'qidongapp:' && u.hostname === 'game' && !u.search && !u.hash) {
           if (/^\/[0-9a-f-]{36}$/.test(u.pathname)) {
+            setFocusReservation(null);
+            setReservationNotice('');
             setFocusInvite(u.pathname.slice(1));
             setPage('home');
             void refresh();
           } else if (['/schedule', '/messages', '/me'].includes(u.pathname)) {
+            setFocusInvite(null);
+            setFocusReservation(null);
+            setReservationNotice('');
             setPage(u.pathname.slice(1) as Page);
             void refresh();
           }
@@ -173,26 +165,6 @@ function AppMain() {
     };
     document.addEventListener('visibilitychange', v);
     v();
-
-    if (isPwa) {
-      const navigate = () => {
-        const link = readLaunch(window.location.href);
-        if (link.invite) {
-          setFocusInvite(link.invite);
-          setPage('home');
-        } else if (link.page) {
-          setPage(link.page);
-        }
-      };
-      navigate();
-      window.addEventListener('popstate', navigate);
-      window.addEventListener('online', v);
-      return () => {
-        document.removeEventListener('visibilitychange', v);
-        window.removeEventListener('popstate', navigate);
-        window.removeEventListener('online', v);
-      };
-    }
 
     const a = App.addListener('appStateChange', (e) => {
       setActive(e.isActive);
@@ -214,9 +186,14 @@ function AppMain() {
   const waiting = snap?.invites.some((i) => i.status === 'pending') ?? false;
   useEffect(() => {
     if (!token || !active) return;
-    void refresh();
-    const timer = setInterval(() => void refresh(), waiting ? 3000 : 6000);
-    return () => clearInterval(timer);
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const poll = async () => {
+      await refresh();
+      if (!stopped) timer = setTimeout(poll, waiting ? 3000 : 6000);
+    };
+    void poll();
+    return () => { stopped = true; clearTimeout(timer); };
   }, [token, active, waiting, refresh]);
 
   // Sync nickname only when server nickname genuinely changes (allows user to clear input cleanly)
@@ -229,22 +206,31 @@ function AppMain() {
   }, [snap?.me.nickname]);
 
 
-  // Reset scroll to top on tab switch (unless jumping to a specific invite card)
+  // Reset only on actual tab switches, not when a completed jump clears its target.
   useEffect(() => {
-    if (!focusInvite) {
-      window.scrollTo({ top: 0, behavior: 'auto' });
-    }
-  }, [page, focusInvite]);
+    if (!focusInvite && !focusReservation) window.scrollTo({ top: 0, behavior: 'auto' });
+  }, [page]);
 
   useEffect(() => {
-    if (focusInvite && page === 'home') {
-      const el = document.getElementById(`invite-${focusInvite}`);
-      if (el) {
-        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        setFocusInvite(null);
-      }
-    }
+    if (!snap || !focusInvite || page !== 'home') return;
+    const el = document.getElementById(`invite-${focusInvite}`);
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    else window.scrollTo({ top: 0, behavior: 'auto' });
+    setFocusInvite(null);
   }, [focusInvite, page, snap]);
+
+  useEffect(() => {
+    if (!snap || !focusReservation || page !== 'schedule') return;
+    const target = document.getElementById(`reservation-${focusReservation}`);
+    if (target) {
+      target.focus({ preventScroll: true });
+      target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } else {
+      setReservationNotice('这条预约已结束或不在当前列表中。');
+      document.getElementById('reservations')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+    setFocusReservation(null);
+  }, [focusReservation, page, snap]);
 
   async function activate(e: FormEvent) {
     e.preventDefault();
@@ -256,15 +242,16 @@ function AppMain() {
     try {
       const r = await apiRequest<{ token?: string }>(
         apiBase,
-        isPwa ? '/api/web/login' : '/api/login',
+        '/api/login',
         null,
         { password: activation.trim(), memberId: activationMember },
       );
-      const next = isPwa ? 'web' : r.token;
+      const next = r.token;
       if (!next) throw Error('no_session');
-      if (!isPwa && Capacitor.isNativePlatform()) {
+      if (Capacitor.isNativePlatform()) {
         await SecureSession.set({ token: next });
       }
+      requestSerial.current++;
       session.current = next;
       setToken(next);
       setActivation('');
@@ -298,7 +285,7 @@ function AppMain() {
           ...(versioned ? { mutation: pending.current.id } : {}),
         });
         pending.current = null;
-        await refresh();
+        await refresh(true);
         return true;
       } catch (e) {
         setError(formatErrorMessage(e));
@@ -306,7 +293,7 @@ function AppMain() {
           pending.current = null;
           if (e.status === 409) {
             if (path === '/api/schedule') setSaveError({message:'你的日程已在另一设备更新，请重新拉取。',isConflict:true});
-            await refresh();
+            await refresh(true);
           }
         }
         return false;
@@ -337,7 +324,7 @@ function AppMain() {
       durationSlots: 2,
       roomRevision: snap.members.reduce((n, m) => n + m.schedule_revision, 0),
       closedAt: null,
-      submissions: snap.members.map((m) => {
+      submissions: snap.members.flatMap<Submission>((m) => {
         const picks = m.schedule.flatMap((p) =>
           nights
             .map((n) => ({
@@ -347,12 +334,14 @@ function AppMain() {
             }))
             .filter((p2) => p2.to > p2.from),
         );
-        return {
+        // An empty schedule alone is not a negative response. Keep elapsed picks for editing.
+        if (!picks.length && m.scheduleStatus !== 'unavailable') return [];
+        return [{
           memberId: m.id,
           nickname: m.nickname,
           answer: picks.length ? { kind: 'available', picks } : { kind: 'unavailable' },
           updatedAt: new Date(snap.now).toISOString(),
-        };
+        }];
       }),
       viewer: {
         memberId: snap.me.id,
@@ -377,7 +366,7 @@ function AppMain() {
     [scheduleSnap, snap],
   );
 
-  async function saveSchedule(answer: Answer, revision: number) {
+  async function saveSchedule(answer: Answer, revision: number, unavailable: boolean) {
     if (!scheduleSnap) return false;
     const picks = answer.kind === 'available' ? mergeSpans(answer.picks) : [];
     if (revision !== scheduleSnap.viewer.mineRevision) {
@@ -387,7 +376,7 @@ function AppMain() {
       });
       return false;
     }
-    const ok = await write('/api/schedule', { picks, revision }, true, 'save-schedule');
+    const ok = await write('/api/schedule', { picks, revision, unavailable }, true, 'save-schedule');
     setSaveError(current => ok ? null : current?.isConflict ? current : { message: '保存未确认，请检查顶部提示并重试。', isConflict: false });
     return ok;
   }
@@ -505,7 +494,6 @@ function AppMain() {
             同一个身份可在多个设备登录。已激活的旧用户请先在「我的」设置长期口令。
           </p>
 
-          {isPwa && <InstallPanel />}
           {error && (
             <p role="alert" className="warning">
               {error}
@@ -600,11 +588,19 @@ function AppMain() {
                 ) : (
                   <p className="helperText">还没有三人连续至少 1 小时的共同空闲。</p>
                 )}
+                <div className="memberConfirmRow" aria-label="成员日程状态">
+                  {snap.members.map((m) => {
+                    const available = m.schedule.some((p) => p.to > Math.ceil(snap.now / 1800000));
+                    const label = available ? '已填空闲' : m.scheduleStatus === 'unavailable' ? '已确认没空' : '未确认空闲';
+                    return <span key={m.id} className={`confirmPill ${available ? 'isConfirmed' : ''}`}>{m.nickname} · {label}</span>;
+                  })}
+                </div>
                 <p className="helperText">每日周期为 06:00 至次日 06:00。</p>
               </section>
 
               <ScheduleEditor
                 snapshot={scheduleSnap}
+                explicitlyUnavailable={snap.members.find((m) => m.id === snap.me.id)?.scheduleStatus === 'unavailable'}
                 earliestStart={Math.ceil(snap.now / 1800000)}
                 isSaving={busy && busyKey === 'save-schedule'}
                 saveError={saveError}
@@ -626,6 +622,7 @@ function AppMain() {
                 me={snap.me.id}
                 members={snap.members}
                 reservations={snap.reservations}
+                notice={reservationNotice}
                 game={game}
                 custom={custom}
                 candidates={candidates}
@@ -640,10 +637,17 @@ function AppMain() {
               snap={snap}
               write={write}
               onJumpInvite={(inviteId) => {
+                setFocusReservation(null);
+                setReservationNotice('');
                 setFocusInvite(inviteId);
                 setPage('home');
               }}
-              onJumpPage={(nextPage) => setPage(nextPage)}
+              onJumpReservation={(reservationId) => {
+                setFocusInvite(null);
+                setReservationNotice('');
+                setFocusReservation(reservationId);
+                setPage('schedule');
+              }}
             />
           )}
 
@@ -655,7 +659,7 @@ function AppMain() {
                   <div>
                     <h2 className="sectionHeading">{snap.me.nickname}</h2>
                     <p className="helperText">
-                      固定成员：{snap.me.id} · {isPwa ? '网页版（与 APK 共用数据）' : 'Android 客户端'}
+                      固定成员：{snap.me.id} · Android 客户端
                     </p>
                   </div>
                 </div>
@@ -700,7 +704,7 @@ function AppMain() {
                 token={token}
                 apiBase={apiBase}
                 onSession={async (next) => {
-                  if (!isPwa && Capacitor.isNativePlatform()) {
+                  if (Capacitor.isNativePlatform()) {
                     if (next) await SecureSession.set({ token: next });
                     else await SecureSession.clear();
                   }
@@ -711,6 +715,9 @@ function AppMain() {
                     setSnap(null);
                     setNickname('');
                     lastServerNickname.current = '';
+                    setFocusInvite(null);
+                    setFocusReservation(null);
+                    setReservationNotice('');
                     setPage('home');
                     setError('');
                   } else {
@@ -720,7 +727,7 @@ function AppMain() {
               />
 
               <PushSettings token={token} apiBase={apiBase} />
-              {isPwa ? <InstallPanel /> : <VersionSettings token={token} apiBase={apiBase} />}
+              <VersionSettings token={token} apiBase={apiBase} />
             </>
           )}
         </>
@@ -735,7 +742,12 @@ function AppMain() {
               type="button"
               className="bottomNavBtn"
               aria-current={isCurrent ? 'page' : undefined}
-              onClick={() => setPage(tab.id)}
+              onClick={() => {
+                setFocusInvite(null);
+                setFocusReservation(null);
+                setReservationNotice('');
+                setPage(tab.id);
+              }}
             >
               <span className="bottomNavIcon">
                 {renderNavIcon(tab.id)}
@@ -753,4 +765,3 @@ function AppMain() {
 }
 
 createRoot(document.getElementById('root')!).render(<AppMain />);
-if (isPwa) registerPwa();

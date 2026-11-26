@@ -1,11 +1,11 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { ChevronDown, Globe, LogOut, RefreshCw, ShieldCheck, Smartphone } from 'lucide-react';
+import { ChevronDown, LogOut, RefreshCw, ShieldCheck, Smartphone } from 'lucide-react';
 import { ConfirmDialog } from './components/ConfirmDialog';
-import { apiEndpoint, fetchWithTimeout, isPwa, webAuth } from './pwa/client';
+import { apiEndpoint, fetchWithTimeout, bearerAuth } from './http';
 
 type Device = {
   id: string;
-  kind: 'android' | 'web' | 'legacy';
+  kind: 'android' | 'legacy';
   created_at: number;
   expires_at: number | null;
 };
@@ -39,7 +39,7 @@ export function AccountPanel({
     const r = await fetchWithTimeout(apiEndpoint(apiBase, path), {
       method: body ? 'POST' : 'GET',
       headers: {
-        ...webAuth(token),
+        ...bearerAuth(token),
         ...(body ? { 'Content-Type': 'application/json' } : {}),
       },
       ...(body ? { body: JSON.stringify(body) } : {}),
@@ -91,7 +91,7 @@ export function AccountPanel({
     setNotice('');
     try {
       const r = await call('/api/account/password', { password, currentPassword: current });
-      const next = isPwa ? 'web' : r.token;
+      const next = r.token;
       if (!next) throw Error('missing_session');
       await onSession(next);
       setCurrent('');
@@ -99,7 +99,6 @@ export function AccountPanel({
       setConfirm('');
       setNoticeTone('info');
       setNotice('个人口令已保存，其他旧会话已失效。');
-      if (isPwa) await load();
     } catch (e) {
       setNoticeTone('error');
       setNotice(
@@ -246,17 +245,9 @@ export function AccountPanel({
                 <div className="subCard deviceRow" key={d.id}>
                   <div className="deviceInfo">
                     <div className="deviceTitleRow">
-                      {d.kind === 'android' ? (
-                        <Smartphone size={15} aria-hidden="true" />
-                      ) : (
-                        <Globe size={15} aria-hidden="true" />
-                      )}
+                      <Smartphone size={15} aria-hidden="true" />
                       <strong className="subCardTitle">
-                        {d.kind === 'web'
-                          ? '网页 / PWA'
-                          : d.kind === 'android'
-                            ? 'Android APK'
-                            : '旧版会话'}
+                        {d.kind === 'android' ? 'Android APK' : '旧版会话'}
                       </strong>
                       {isCurrent && <span className="badgeAccent">当前设备</span>}
                     </div>

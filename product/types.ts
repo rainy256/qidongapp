@@ -1,5 +1,5 @@
 import type { GameTag, Span } from '../src/original/domain/types';
-import { apiEndpoint, fetchWithTimeout, webAuth } from './pwa/client';
+import { apiEndpoint, fetchWithTimeout, bearerAuth } from './http';
 
 export type WeekSpan = { day: number; from: number; to: number };
 
@@ -8,6 +8,7 @@ export type Member = {
   nickname: string;
   schedule: Span[];
   schedule_revision: number;
+  scheduleStatus?: 'available' | 'unavailable' | 'unanswered';
   last_seen: number | null;
   template?: WeekSpan[];
   overrideDays?: number[];
@@ -140,7 +141,7 @@ export async function apiRequest<T>(
   const res = await fetchWithTimeout(apiEndpoint(apiBase, path), {
     method: input ? 'POST' : 'GET',
     headers: {
-      ...webAuth(token),
+      ...bearerAuth(token),
       ...(input ? { 'Content-Type': 'application/json' } : {}),
     },
     ...(input ? { body: JSON.stringify(input) } : {}),
