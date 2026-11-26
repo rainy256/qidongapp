@@ -1,0 +1,37 @@
+name: Vendor original qidong
+on:
+  push:
+    paths:
+      - '.github/workflows/vendor-original.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  vendor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/checkout@v4
+        with:
+          repository: rainy256/qidong
+          ref: b318ce568e217eb757dd5ff15f94df42e292636e
+          path: .upstream
+          persist-credentials: false
+      - name: Copy original assets, components, algorithm and tests verbatim
+        run: |
+          test ! -e src/original
+          mkdir -p src/original public/art docs/upstream
+          cp -a .upstream/src/. src/original/
+          cp -a .upstream/public/art/. public/art/
+          cp -a .upstream/docs/. docs/upstream/
+          cp .upstream/README.md docs/upstream/README.md
+          diff -qr .upstream/src src/original
+          diff -qr .upstream/public/art public/art
+          git -C .upstream ls-files > docs/upstream/INVENTORY.txt
+          printf '%s\n' b318ce568e217eb757dd5ff15f94df42e292636e > docs/upstream/REVISION
+          git add src/original docs/upstream
+          git add -f public/art
+          git -c user.name='qidongapp migration' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'chore: vendor original qidong UI, assets and algorithm tests verbatim'
+          git push origin HEAD:main
