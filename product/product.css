@@ -1120,3 +1120,16 @@
 .appShell [id^='invite-'] {
   scroll-margin-top: 76px;
 }
+
+/* Fixed three-member callable status: one row per person. */
+.squadCard .members { grid-template-columns: minmax(0,1fr); gap: 6px; }
+.squadCard .memberItem { flex-direction: row; text-align:left; align-items:center; gap:8px; flex-wrap:wrap; padding:8px 0; }
+.squadCard .memberItem + .memberItem { border-top:1px solid var(--border-hairline); }
+.memberIdentity { display:flex; flex-direction:column; min-width:0; flex:1; }
+.memberIdentity .memberName { max-width:100%; }
+.availabilityStatus { font-size:0.83rem; color:var(--ink-muted); font-variant-numeric:tabular-nums; }
+.availabilityStatus.isCallable { color:var(--brand-soft-ink); font-weight:750; }
+.availabilityActions { display:flex; gap:4px; flex-wrap:wrap; }
+.replyMemberRow .replyPill { max-width:72%; white-space:normal; text-align:right; }
+.rebookOptions { margin-top:8px; }
+#reservation-form { scroll-margin-top:80px; }
