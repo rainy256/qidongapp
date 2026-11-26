@@ -17,8 +17,7 @@
     ]
   },
   "include": [
-    "src/**/*.tsx",
-    "src/**/*.ts",
+    "src/main.tsx",
     "capacitor.config.ts"
   ]
 }
