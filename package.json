@@ -6,6 +6,7 @@
   "scripts": {
     "build": "tsc --noEmit && vite build",
     "test": "node --test tests/*.test.mjs",
+    "build:worker": "npx --yes wrangler@4.168.0 deploy --config product/wrangler.example.jsonc --dry-run --outdir .wrangler/qidongapp-worker",
     "build:product": "tsc -p product/tsconfig.json && vite build --config product/vite.config.ts",
     "test:product": "node --test product/tests/*.test.mjs && python3 product/tests/schema_test.py && vitest run src/original/domain/recommend.test.ts product/tests/http.test.ts"
   },

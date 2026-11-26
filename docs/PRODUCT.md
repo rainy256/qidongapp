@@ -68,3 +68,9 @@ Android Keystore AES-GCM 原生插件已编写，产品构建配置单独生成 
 第一版：ENABLE_REBOOKING 默认为 false（缺省同样关闭）。保持每分钟 Cron，提醒仅发给等待本人，遵守免打扰，重新回复作废旧任务；已进入 WxPusher 请求的通知无法撤回。到场时间达到或超过车票截止时间时不排提醒。第二版开启前先通过真机第一版验收，再将 Worker 环境变量 ENABLE_REBOOKING 设置为字符串 true 并重新部署，无须迁移数据库或更换 APK 签名。
 
 验收：在现有正式签名 APK 上覆盖安装验收构建；测试慢网单次状态请求、同账号两设备设置/结束可喊、后台和冷启动点击通知、延时回复与过期旧任务、已有日程迁移及两人同时预约冲突。必须在真实华为/卓易通设备确认后才更新 RELEASE_VERSION 发布，禁止提前卸载旧 APK。GitHub Actions 单元/集成测试与 debug 构建不等价于真机验收。
+
+## 正式 Worker 打包
+
+在仓库根目录运行 `npm run build:worker`。Wrangler 会从 `product/worker/index.mjs` 开始解析依赖，将 APK 和后端共用的 `product/native-link.mjs` 一并打入 `product/.wrangler/qidongapp-worker/index.js`。该命令只生成本地文件。
+
+使用 Cloudflare 版本上传接口时，以这个 `index.js` 作为唯一 JavaScript 模块及 `main_module`。核对正式版本继承的 D1、推送密钥、现有绑定、功能开关和兼容日期，先上传待发布版本，再按上文顺序应用缺失迁移、切换流量。发布后通过 APK 的 `/app-api/health` 和通知入口 `/open/schedule` 核对线上结果。
