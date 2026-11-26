@@ -83,10 +83,11 @@ export default {async fetch(req,env,ctx){
    if(!mutationValid(b.mutation)||!Object.hasOwn(GAMES,b.game))return json({error:'invalid_invite'},400);
    const title=b.game==='custom'&&typeof b.title==='string'?b.title.trim():GAMES[b.game];
    if(!title||title.length>32)return json({error:'invalid_title'},400);
+   const existing=await env.DB.prepare('SELECT '+publicInvite+' FROM app_invites WHERE creator=? AND mutation=?').bind(me.id,b.mutation).first();if(existing)return json({invite:inviteView(existing,now)});
    const replies=MEMBER_IDS.map(id=>id===me.id?'ready':'pending');
-   const row=await env.DB.prepare('INSERT INTO app_invites(id,creator,mutation,game,title,created_at,expires_at,r1,r2,r3) VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(creator,mutation) DO NOTHING RETURNING '+publicInvite).bind(crypto.randomUUID(),me.id,b.mutation,b.game,title,now,now+1800000,...replies).first();
+   const row=await env.DB.prepare('INSERT INTO app_invites(id,creator,mutation,game,title,created_at,expires_at,r1,r2,r3) SELECT ?,?,?,?,?,?,?,?,?,? WHERE NOT EXISTS(SELECT 1 FROM app_invites WHERE creator=? AND created_at>?) ON CONFLICT(creator,mutation) DO NOTHING RETURNING '+publicInvite).bind(crypto.randomUUID(),me.id,b.mutation,b.game,title,now,now+1800000,...replies,me.id,now-60000).first();
    const saved=row||await env.DB.prepare('SELECT '+publicInvite+' FROM app_invites WHERE creator=? AND mutation=?').bind(me.id,b.mutation).first();
-   if(row)kick();return json({invite:inviteView(saved,now)},row?201:200);
+   if(!saved)return json({error:'rate_limited'},429);if(row)kick();return json({invite:inviteView(saved,now)},row?201:200);
   }
   const match=path.match(/^\/api\/invites\/([a-z0-9-]{36})\/reply$/);
   if(match){
