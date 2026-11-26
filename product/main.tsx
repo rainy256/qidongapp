@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from '@capacitor/app';
+import { Network } from '@capacitor/network';
 import { Capacitor, registerPlugin } from '@capacitor/core';
 import { Bell, Calendar, Home, RefreshCw, User } from 'lucide-react';
 import { AvatarDot } from '../src/original/components/AvatarChip';
@@ -21,6 +22,7 @@ import { MessagesView } from './components/MessagesView';
 import { ScheduleEditor } from './components/ScheduleEditor';
 import { PushSettings, ReservationPanel, VersionSettings, WeeklyTemplate } from './features';
 import { createRefreshGate } from './refresh-gate.mjs';
+import { createRefreshLoop } from './refresh-loop.mjs';
 import { parseNativeLaunch } from './native-link.mjs';
 import {
   ApiError,
@@ -77,6 +79,7 @@ function AppMain() {
 
   const requestSerial = useRef(0); // session generation, not polling generation
   const refreshGate = useRef(createRefreshGate());
+  const refreshLoop = useRef<ReturnType<typeof createRefreshLoop> | null>(null);
   const session = useRef<string | null>(null);
   const pending = useRef<{ key: string; id: string } | null>(null);
   const pendingSchedule = useRef<{ key: string; id: string } | null>(null);
@@ -179,26 +182,38 @@ function AppMain() {
   );
 
   useEffect(() => {
+    const wake = () => {
+      const loop = refreshLoop.current;
+      if (loop) loop.wake();
+      else void refresh(true);
+    };
     const v = () => {
-      setActive(!document.hidden);
-      if (!document.hidden) void refresh();
+      const visible = !document.hidden;
+      setActive(visible);
+      if (visible) wake();
     };
     document.addEventListener('visibilitychange', v);
     v();
 
     const a = App.addListener('appStateChange', (e) => {
       setActive(e.isActive);
-      if (e.isActive) void refresh();
+      if (e.isActive) wake();
+    });
+    const network = Network.addListener('networkStatusChange', (status) => {
+      if (status.connected) wake();
     });
     const b = App.addListener('appUrlOpen', (e) => receive(e.url));
+    window.addEventListener('online', wake);
     App.getLaunchUrl()
       .then((x) => {
         if (x?.url) receive(x.url);
       })
       .catch(() => {});
     return () => {
-      void a.then((x) => x.remove());
-      void b.then((x) => x.remove());
+      void a.then((x) => x.remove()).catch(() => {});
+      void network.then((x) => x.remove()).catch(() => {});
+      void b.then((x) => x.remove()).catch(() => {});
+      window.removeEventListener('online', wake);
       document.removeEventListener('visibilitychange', v);
     };
   }, [receive, refresh]);
@@ -206,14 +221,16 @@ function AppMain() {
   const waiting = snap?.invites.some((i) => i.status === 'pending') ?? false;
   useEffect(() => {
     if (!token || !active) return;
-    let stopped = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const poll = async () => {
-      await refresh();
-      if (!stopped) timer = setTimeout(poll, waiting ? 3000 : 6000);
+    const loop = createRefreshLoop({
+      run: (afterCurrent) => refresh(afterCurrent),
+      interval: () => waiting ? 3000 : 6000,
+    });
+    refreshLoop.current = loop;
+    loop.start();
+    return () => {
+      loop.stop();
+      if (refreshLoop.current === loop) refreshLoop.current = null;
     };
-    void poll();
-    return () => { stopped = true; clearTimeout(timer); };
   }, [token, active, waiting, refresh]);
 
   // Sync nickname only when server nickname genuinely changes (allows user to clear input cleanly)
