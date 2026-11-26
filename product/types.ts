@@ -10,6 +10,8 @@ export type Member = {
   schedule_revision: number;
   scheduleStatus?: 'available' | 'unavailable' | 'unanswered';
   last_seen: number | null;
+  available_until?: number | null;
+  availability_revision?: number;
   template?: WeekSpan[];
   overrideDays?: number[];
 };
@@ -25,6 +27,9 @@ export type Invite = {
   r1: string;
   r2: string;
   r3: string;
+  r1_eta?: number | null;
+  r2_eta?: number | null;
+  r3_eta?: number | null;
   status: 'pending' | 'assembled' | 'expired';
 };
 
@@ -69,6 +74,7 @@ export type Nudge = {
 };
 
 export type Snapshot = {
+  features?: { rebook: boolean };
   reservations: Reservation[];
   reservationMessages: ReservationMessage[];
   nudges: Nudge[];
@@ -106,6 +112,21 @@ export const GAME_LABELS: Record<GameTag, string> = {
 
 export function memberReply(inv: Invite, id: string): string {
   return id === 'm1' ? inv.r1 : id === 'm2' ? inv.r2 : inv.r3;
+}
+
+export function memberEta(inv: Invite, id: string): number | null {
+  return (id === 'm1' ? inv.r1_eta : id === 'm2' ? inv.r2_eta : inv.r3_eta) ?? null;
+}
+
+export function tonightDeadline(now: number): number {
+  return Math.floor((now + 28800000) / 86400000) * 86400000 - 28800000 + 23 * 3600000;
+}
+
+export function relativeTime(ms: number, now: number): string {
+  const day = (v: number) => Math.floor((v + 28800000) / 86400000);
+  const time = new Date(ms).toLocaleTimeString('zh-CN', {timeZone:'Asia/Shanghai',hour12:false,hour:'2-digit',minute:'2-digit'});
+  const delta = day(ms) - day(now);
+  return delta === 0 ? time : delta === 1 ? '明天 ' + time : delta === -1 ? '昨天 ' + time : formatTimestamp(ms);
 }
 
 export function formatTimestamp(ms: number): string {
@@ -155,6 +176,7 @@ export async function apiRequest<T>(
 
 export function formatErrorMessage(e: unknown): string {
   if (e instanceof ApiError) {
+    if (e.code === 'reservation_conflict') return '这个时间已有预约，请查看已有预约或改选其他时段';
     if (e.status === 409) return '数据已更新或邀请已过期，请刷新后重试';
     if (e.status === 401) return '身份凭证无效，请联系管理员';
     if (e.status === 429) return '操作过于频繁，请稍后重试';
