@@ -52,6 +52,146 @@ describe('production squad read routes', () => {
     expect(fetcher.mock.calls.map(call=>call[0])).toEqual([primary+'/state',direct,'https://custom.test/api/state']);
   });
 
+  // OPT-001: simulate the actual fetch/JSON boundary, not a mocked apiRequest.
+  function scriptedFetch(plans: Record<string, {delay: number; status?: number; code?: string; html?: boolean; network?: boolean}>) {
+    const fetcher = vi.fn((url: string, init: RequestInit) => new Promise<Response>((resolve, reject) => {
+      const plan = plans[url];
+      if (!plan) throw new Error('unexpected route: '+url);
+      const signal = init.signal!;
+      const abort = () => {
+        clearTimeout(timer);
+        reject(new DOMException('Aborted', 'AbortError'));
+      };
+      const timer = Number.isFinite(plan.delay) ? setTimeout(() => {
+        signal.removeEventListener('abort', abort);
+        if (plan.network) reject(new TypeError('network'));
+        else if (plan.html) resolve(new Response('<html>upstream</html>', {status:plan.status}));
+        else resolve(Response.json(plan.status ? {error:plan.code ?? 'route_error'} : {now:7}, {status:plan.status ?? 200}));
+      }, plan.delay) : undefined;
+      if (signal.aborted) abort();
+      else signal.addEventListener('abort', abort, {once:true});
+    }));
+    vi.stubGlobal('fetch', fetcher);
+    return fetcher;
+  }
+
+  it.each([403, 404, 429])('keeps the primary alive when the backup returns %i first', async status => {
+    vi.useFakeTimers();
+    const fetcher = scriptedFetch({[primary+'/state']:{delay:5000}, [direct]:{delay:100,status}});
+    let settled = false;
+    const result = read();
+    void result.then(() => { settled = true; }, () => { settled = true; });
+    await vi.advanceTimersByTimeAsync(4499);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(101);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(settled).toBe(false);
+    expect(fetcher.mock.calls[0][1].signal!.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(400);
+    await expect(result).resolves.toEqual({now:7});
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it.each([403, 404, 429, 408, 503])('starts the backup immediately after primary %i', async status => {
+    vi.useFakeTimers();
+    const fetcher = scriptedFetch({[primary+'/state']:{delay:0,status}, [direct]:{delay:100}});
+    const result = expect(read()).resolves.toEqual({now:7});
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(100);
+    await result;
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it.each([[5000,100],[100,5000]])('reports the primary error when both fail (%i, %i ms)', async (primaryDelay, backupDelay) => {
+    vi.useFakeTimers();
+    const fetcher = scriptedFetch({[primary+'/state']:{delay:primaryDelay,status:503}, [direct]:{delay:backupDelay,status:429}});
+    const result = expect(read()).rejects.toMatchObject({status:503,code:'route_error'});
+    await vi.advanceTimersByTimeAsync(10000);
+    await result;
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('propagates a definitive Worker 401 on the backup and cancels the primary', async () => {
+    vi.useFakeTimers();
+    const fetcher = scriptedFetch({[primary+'/state']:{delay:5000}, [direct]:{delay:0,status:401,code:'unauthorized'}});
+    const result = expect(read()).rejects.toMatchObject({status:401,code:'unauthorized'});
+    await vi.advanceTimersByTimeAsync(4501);
+    await result;
+    expect(fetcher.mock.calls[0][1].signal!.aborted).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('does not let an upstream HTML 401 on the backup cancel a healthy primary', async () => {
+    vi.useFakeTimers();
+    const fetcher = scriptedFetch({[primary+'/state']:{delay:5000}, [direct]:{delay:100,status:401,html:true}});
+    const result = expect(read()).resolves.toEqual({now:7});
+    await vi.advanceTimersByTimeAsync(4600);
+    expect(fetcher.mock.calls[0][1].signal!.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(400);
+    await result;
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('does not report an unrecognized upstream 401 as a session failure even if both routes fail', async () => {
+    vi.useFakeTimers();
+    const fetcher = scriptedFetch({[primary+'/state']:{delay:0,status:401,html:true}, [direct]:{delay:100,status:503}});
+    const result = expect(read()).rejects.toMatchObject({
+      message:'Unrecognized state route authentication response', cause:{status:401,code:'request_failed'},
+    });
+    await vi.advanceTimersByTimeAsync(101);
+    await result;
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('keeps the original deadline even if the backup has already failed', async () => {
+    vi.useFakeTimers();
+    const fetcher = scriptedFetch({[primary+'/state']:{delay:Infinity}, [direct]:{delay:100,status:429}});
+    let settled = false;
+    const pending = read();
+    void pending.then(() => { settled = true; }, () => { settled = true; });
+    const result = expect(pending).rejects.toMatchObject({name:'AbortError'});
+    await vi.advanceTimersByTimeAsync(19999);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    await result;
+    expect(fetcher.mock.calls[0][1].signal!.aborted).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('cancels both active routes on session invalidation', async () => {
+    vi.useFakeTimers();
+    const fetcher = scriptedFetch({[primary+'/state']:{delay:Infinity}, [direct]:{delay:Infinity}});
+    const ctl = new AbortController();
+    const result = expect(readSquadState(primary,'fixture',ctl.signal)).rejects.toMatchObject({name:'AbortError'});
+    await vi.advanceTimersByTimeAsync(4500);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    ctl.abort();
+    await result;
+    expect(fetcher.mock.calls.every(([,init]) => init.signal!.aborted)).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('does not start any route for an already invalidated read', async () => {
+    vi.useFakeTimers();
+    const fetcher = scriptedFetch({});
+    const ctl = new AbortController();
+    ctl.abort();
+    await expect(readSquadState(primary,'fixture',ctl.signal)).rejects.toMatchObject({name:'AbortError'});
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it.each(['/api/schedule','/api/login','/api/invites','/api/reservations','/api/availability'])('never automatically replays POST %s', async path => {
+    const fetcher = vi.fn().mockRejectedValue(new TypeError('network'));
+    vi.stubGlobal('fetch', fetcher);
+    await expect(apiRequest(primary,path,'fixture',{})).rejects.toThrow('network');
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(fetcher).toHaveBeenCalledWith(primary+path.slice(4),expect.objectContaining({method:'POST'}));
+  });
+
   it('keeps one deadline for both routes and cancels promptly on invalidation', async () => {
     vi.useFakeTimers();
     const signals: AbortSignal[] = [];

@@ -17,7 +17,8 @@ export async function readSquadState(base: string, token: string, signal: AbortS
   try {
     return await new Promise<Snapshot>((resolve, reject) => {
       let backupStarted = false;
-      let failures = 0;
+      let primaryFailure: {error: unknown} | undefined;
+      let backupFailure: {error: unknown} | undefined;
       requests.signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), {once:true});
       function startBackup() {
         if (backupStarted || requests.signal.aborted) return;
@@ -27,15 +28,28 @@ export async function readSquadState(base: string, token: string, signal: AbortS
       async function read(origin: string) {
         try {
           const snapshot = await apiRequest<Snapshot>(origin, '/api/state', token, undefined, requests.signal);
-          resolve(snapshot);
+          if (!requests.signal.aborted) resolve(snapshot);
         } catch (error) {
           if (requests.signal.aborted) return;
-          if (error instanceof ApiError && error.status < 500 && error.status !== 408) {
+          // The Worker reports invalid/expired sessions as 401 + unauthorized.
+          // Other HTTP errors may be specific to a route, not the session.
+          if (error instanceof ApiError && error.status === 401 && error.code === 'unauthorized') {
             reject(error);
             return;
           }
-          if (++failures === 2) reject(error);
-          else startBackup();
+          if (origin === primary) primaryFailure = {error};
+          else backupFailure = {error};
+          if (primaryFailure && backupFailure) {
+            // Report the primary failure consistently, regardless of finish order.
+            const failure = primaryFailure.error;
+            // The refresh caller logs out on any ApiError 401. Do not let an
+            // unrecognized upstream 401 invalidate a valid local session.
+            reject(failure instanceof ApiError && failure.status === 401
+              ? new Error('Unrecognized state route authentication response', {cause: failure})
+              : failure);
+          } else if (origin === primary) {
+            startBackup();
+          }
         }
       }
       backupTimer = setTimeout(startBackup, 4500);
