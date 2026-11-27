@@ -36,6 +36,9 @@ type DraftSegment = {
 };
 
 type ScheduleEditorProps = Readonly<{
+  visible: boolean;
+  isDirty: boolean;
+  setIsDirty: (dirty: boolean) => void;
   snapshot: RoomSnapshot;
   explicitlyUnavailable: boolean;
   earliestStart: Slot;
@@ -94,6 +97,9 @@ function pickInitialNightId(snapshot: RoomSnapshot, earliestStart: Slot): string
 }
 
 export function ScheduleEditor({
+  visible,
+  isDirty,
+  setIsDirty,
   snapshot,
   explicitlyUnavailable,
   earliestStart,
@@ -117,7 +123,6 @@ export function ScheduleEditor({
   const [isEditing, setIsEditing] = useState<boolean>(
     !mySubmission,
   );
-  const [isDirty, setIsDirty] = useState<boolean>(false);
   const [draftMode, setDraftMode] = useState<'available' | 'unavailable'>(
     explicitlyUnavailable || mySubmission?.answer.kind === 'unavailable' ? 'unavailable' : 'available',
   );
@@ -132,41 +137,38 @@ export function ScheduleEditor({
   const [confirmReload, setConfirmReload] = useState(false);
   const [reloading, setReloading] = useState(false);
 
-  const identityKey = `${snapshot.id}:${snapshot.viewer.memberId ?? 'guest'}`;
-  const [lastIdentity, setLastIdentity] = useState<string>(identityKey);
+  const [windowNotice, setWindowNotice] = useState('');
+  const [reviewUnavailable, setReviewUnavailable] = useState(false);
+  const [replacement, setReplacement] = useState<{ nightId: string; span: Span; revision: number } | null>(null);
+  const previousWindow = useRef(snapshot.id);
 
   useEffect(() => {
-    if (identityKey !== lastIdentity) {
-      setLastIdentity(identityKey);
-      draftRevision.current = null;
-      setActiveNightId(pickInitialNightId(snapshot, earliestStart));
-      setIsDirty(false);
-      setValidationMsg(null);
-      setIsEditing(!mySubmission);
-      setDraftMode(explicitlyUnavailable || mySubmission?.answer.kind === 'unavailable' ? 'unavailable' : 'available');
-      setDraftByNight(
-        buildDraftMap(
-          snapshot.nights,
-          mySubmission?.answer.kind === 'available' ? mySubmission.answer.picks : [],
-        ),
-      );
-      return;
+    if (!visible) {
+      setReplacement(null);
+      setConfirmReload(false);
     }
+  }, [visible]);
 
-    if (!isDirty) {
-      draftRevision.current = null;
-      setDraftMode(explicitlyUnavailable || mySubmission?.answer.kind === 'unavailable' ? 'unavailable' : 'available');
-      setDraftByNight(
-        buildDraftMap(
-          snapshot.nights,
-          mySubmission?.answer.kind === 'available' ? mySubmission.answer.picks : [],
-        ),
-      );
-      if (!snapshot.nights.some((n) => n.id === activeNightId)) {
-        setActiveNightId(snapshot.nights[0]?.id ?? '');
+  useEffect(() => {
+    const rolled = previousWindow.current !== snapshot.id;
+    previousWindow.current = snapshot.id;
+    if (!isDirty || rolled) {
+      const saved = buildDraftMap(snapshot.nights, mySubmission?.answer.kind === 'available' ? mySubmission.answer.picks : []);
+      if (isDirty) {
+        // Night IDs are absolute Shanghai dates. The incoming day starts with its server schedule.
+        setDraftByNight(previous => Object.fromEntries(snapshot.nights.map(n => [n.id, previous[n.id] ?? saved[n.id]])));
+        setWindowNotice('七天日期已更新。已移出范围的日期已移除，其余日期的草稿已保留。');
+        setReviewUnavailable(draftMode === 'unavailable');
+      } else {
+        draftRevision.current = null;
+        setDraftByNight(saved);
+        setDraftMode(explicitlyUnavailable || mySubmission?.answer.kind === 'unavailable' ? 'unavailable' : 'available');
+        setWindowNotice('');
+        setReviewUnavailable(false);
       }
+      if (!snapshot.nights.some(n => n.id === activeNightId)) setActiveNightId(snapshot.nights[0]?.id ?? '');
     }
-  }, [activeNightId, earliestStart, explicitlyUnavailable, identityKey, isDirty, lastIdentity, mySubmission, snapshot]);
+  }, [snapshot, activeNightId, mySubmission, explicitlyUnavailable, isDirty, draftMode]);
 
   const activeNight =
     snapshot.nights.find((n) => n.id === activeNightId) ?? snapshot.nights[0] ?? null;
@@ -301,7 +303,7 @@ export function ScheduleEditor({
     });
   };
 
-  const applyQuickSpan = (span: Span) => {
+  const replaceActiveDay = (span: Span) => {
     if (!activeNight) return;
     const from = Math.max(span.from, earliestStart);
     if (from >= span.to) return;
@@ -311,6 +313,19 @@ export function ScheduleEditor({
       ...prev,
       [activeNight.id]: [{ from, to: span.to }],
     }));
+  };
+
+  const applyQuickSpan = (span: Span) => {
+    if (!activeNight) return;
+    const from = Math.max(span.from, earliestStart);
+    if (from >= span.to) return;
+    const existing = activeSegments.filter(segment => segment.from !== null || segment.to !== null);
+    if (existing.length === 1 && activeSegments.length === 1 && existing[0].from === from && existing[0].to === span.to) return;
+    if (existing.length) {
+      setReplacement({ nightId: activeNight.id, span: { from, to: span.to }, revision: snapshot.viewer.mineRevision });
+    } else {
+      replaceActiveDay(span);
+    }
   };
 
   const addSecondSegment = () => {
@@ -338,6 +353,7 @@ export function ScheduleEditor({
 
   const toggleUnavailable = () => {
     markDirty();
+    setReviewUnavailable(false);
     setDraftMode((prev) => (prev === 'unavailable' ? 'available' : 'unavailable'));
   };
 
@@ -357,7 +373,7 @@ export function ScheduleEditor({
   };
 
   const handleSave = async () => {
-    if (isSaving || reloading) return;
+    if (isSaving || reloading || reviewUnavailable) return;
     if (draftMode === 'available') {
       const incomplete = Object.values(draftByNight).flat().some(s =>
         (s.from === null) !== (s.to === null) || (s.from !== null && s.to !== null && s.to <= s.from));
@@ -434,6 +450,8 @@ export function ScheduleEditor({
     );
   };
 
+  if (!visible) return null;
+
   if (mySubmission && !isEditing) {
     const remaining = mySubmission.answer.kind === 'available'
       ? mySubmission.answer.picks.map(p => ({ ...p, from: Math.max(p.from, earliestStart) })).filter(p => p.to > p.from)
@@ -487,7 +505,7 @@ export function ScheduleEditor({
 
   return (
     <div className="scheduleEditorWrap">
-      <section id="time-picker" className={styles.card} aria-label="编辑未来七天空闲">
+      <section id="time-picker" className={styles.card} aria-label="编辑未来七天空闲" inert={isSaving || reloading}>
         <div className={styles.editorHeader}>
           <h2 className={styles.sectionTitle}>{mySubmission ? '编辑未来七天空闲' : '你这周什么时候能玩？'}</h2>
           {mySubmission && (
@@ -651,6 +669,17 @@ export function ScheduleEditor({
         />
       </section>
 
+      <ConfirmDialog
+        open={replacement !== null && replacement.nightId === activeNight.id && replacement.revision === snapshot.viewer.mineRevision}
+        title="替换这一天的时段？"
+        body={replacement ? `将把 ${formatNightShort(activeNight.dateKey)} 已填的时段替换为 ${formatSpanInNight(activeNight, replacement.span)}。其他日期保留原草稿。` : ''}
+        confirmLabel="替换时段" cancelLabel="保留原时段" tone="primary"
+        onCancel={() => setReplacement(null)}
+        onConfirm={() => {
+          if (replacement?.nightId === activeNight.id && replacement.revision === snapshot.viewer.mineRevision) replaceActiveDay(replacement.span);
+          setReplacement(null);
+        }}
+      />
       <ConfirmDialog open={confirmReload} title="重新载入日程" body="将放弃尚未保存的草稿，并拉取其他设备的最新日程。" confirmLabel="拉取并重新编辑" tone="primary" busy={reloading} onCancel={() => setConfirmReload(false)} onConfirm={() => void reloadDraft()}/>
       <div className={`${styles.bottomDock} productDock`}>
         {feedback && (
@@ -667,6 +696,16 @@ export function ScheduleEditor({
             )}
             <span className="tabular">{feedback.message}</span>
           </div>
+        )}
+
+        {windowNotice && <p role="status" className={styles.browserHint}>{windowNotice}</p>}
+        {reviewUnavailable && <button type="button" className={styles.refreshBtn} onClick={() => setReviewUnavailable(false)}>
+          确认新范围（至 {formatNightShort(snapshot.nights[snapshot.nights.length - 1].dateKey)}）都没空
+        </button>}
+        {isDirty && draftRevision.current !== snapshot.viewer.mineRevision && !saveError && (
+          <p role="status" className={styles.browserHint}>其他设备已更新日程，本机草稿仍保留。
+            <button type="button" className={styles.refreshBtn} onClick={() => setConfirmReload(true)}>查看最新日程</button>
+          </p>
         )}
 
         {validationMsg && (
@@ -703,7 +742,7 @@ export function ScheduleEditor({
           <button
             type="button"
             className={styles.primaryBtn}
-            disabled={isSaving || reloading}
+            disabled={isSaving || reloading || reviewUnavailable}
             onClick={() => void handleSave()}
           >
             {isSaving

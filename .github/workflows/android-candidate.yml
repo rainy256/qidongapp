@@ -62,11 +62,24 @@ jobs:
           mkdir -p "$RUNNER_TEMP/previous-apk"
           gh release download "$PREVIOUS_TAG" --pattern qidongapp.apk --pattern qidongapp.apk.sha256 --dir "$RUNNER_TEMP/previous-apk"
           (cd "$RUNNER_TEMP/previous-apk" && sha256sum -c qidongapp.apk.sha256)
-          python3 product/scripts/verify-upgrade.py "$RUNNER_TEMP/previous-apk/qidongapp.apk" qidongapp.apk
+          result="$(python3 product/scripts/verify-upgrade.py "$RUNNER_TEMP/previous-apk/qidongapp.apk" qidongapp.apk)"
+          echo "$result"
+          {
+            echo "# 启动！$VITE_APP_VERSION 候选版验收"
+            echo
+            echo "升级起点：$PREVIOUS_TAG · 提交：$GITHUB_SHA"
+            echo
+            echo "自动校验：$result"
+            echo
+            cat qidongapp.apk.sha256
+            echo
+            cat docs/DEVICE_CHECK.md
+          } > device-check.md
       - uses: actions/upload-artifact@v4
         with:
           name: qidongapp-signed-acceptance
           path: |
             qidongapp.apk
             qidongapp.apk.sha256
+            device-check.md
           if-no-files-found: error

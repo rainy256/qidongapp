@@ -24,6 +24,7 @@ import { PushSettings, ReservationPanel, VersionSettings, WeeklyTemplate } from 
 import { createRefreshGate } from './refresh-gate.mjs';
 import { createRefreshLoop } from './refresh-loop.mjs';
 import { applyConfirmedWrite, type WriteResult } from './confirmed-write';
+import { NetworkDiagnostics, NetworkMeasurement } from './network-diagnostics';
 import { readSquadState } from './state-read';
 import { parseNativeLaunch } from './native-link.mjs';
 import {
@@ -60,7 +61,8 @@ function AppMain() {
   const [activation, setActivation] = useState('');
   const [activationMember, setActivationMember] = useState('m1');
   const [error, setError] = useState('');
-  const [syncError, setSyncError] = useState('');
+  const [syncError, setSyncError] = useState<{ detail: string; failures: number } | null>(null);
+  const [scheduleDirty, setScheduleDirty] = useState(false);
   const [manualRefreshPending, setManualRefreshPending] = useState(false);
   const [snap, setSnap] = useState<Snapshot | null>(null);
   const [page, setPage] = useState<Page>('home');
@@ -81,6 +83,8 @@ function AppMain() {
   const [saveError, setSaveError] = useState<{ message: string; isConflict: boolean } | null>(null);
 
   const requestSerial = useRef(0); // session generation, not polling generation
+  const measurement = useRef<NetworkMeasurement | null>(null);
+  const [diagnostics, setDiagnostics] = useState<{ report: NetworkMeasurement; active: boolean } | null>(null);
   const refreshGate = useRef(createRefreshGate());
   const refreshLoop = useRef<ReturnType<typeof createRefreshLoop> | null>(null);
   const session = useRef<string | null>(null);
@@ -120,9 +124,14 @@ function AppMain() {
     const id = requestSerial.current;
     return refreshGate.current.run(id, async signal => {
     if (signal.aborted || id !== requestSerial.current || session.current !== t) return false;
+    const run = measurement.current;
+    const started = performance.now();
+    let backup = false;
     try {
-      const data = await readSquadState(apiBase, t, signal);
+      const data = await readSquadState(apiBase, t, signal, () => { backup = true; });
       if (signal.aborted || id !== requestSerial.current || session.current !== t) return false;
+      if (run && measurement.current === run) run.finish('read', started, true, backup);
+      const receivedAt = performance.now();
       setSnap(old => {
         const members = data.members.map(m => {
           const previous = old?.me.id === data.me.id && old.members.find(x => x.id === m.id);
@@ -133,27 +142,32 @@ function AppMain() {
           }
           return m;
         });
-        return {...data, members, clientClock: performance.now()};
+        return {...data, members, clientClock: receivedAt};
       });
-      setSyncError('');
+      setSyncError(null);
       return true;
     } catch (e) {
       if (signal.aborted || id !== requestSerial.current || session.current !== t) return false;
+      if (run && measurement.current === run) run.finish('read', started, false, backup, e);
       if (e instanceof ApiError && e.status === 401) {
         requestSerial.current++;
         session.current = null;
         setToken(null);
         setSnap(null);
+        measurement.current = null;
+        setDiagnostics(null);
+        setScheduleDirty(false);
+        setSaveError(null);
         setNickname('');
         lastServerNickname.current = '';
         if (Capacitor.isNativePlatform()) {
           void SecureSession.clear().catch(() => {});
         }
-        setSyncError('');
+        setSyncError(null);
         setError('登录状态已失效，请使用个人口令重新登录。');
         return false;
       }
-      setSyncError('小队数据暂未刷新，稍后会自动重试。' + formatErrorMessage(e));
+      setSyncError(previous => ({ detail: formatErrorMessage(e), failures: (previous?.failures ?? 0) + 1 }));
       return false;
     }
     }, afterCurrent);
@@ -209,11 +223,15 @@ function AppMain() {
       setActive(e.isActive);
       if (e.isActive) wake();
     });
-    const network = Network.addListener('networkStatusChange', (status) => {
-      if (status.connected) wake();
+    const offline = () => measurement.current?.connectivity(false);
+    const online = () => { measurement.current?.connectivity(true); wake(); };
+    const network = Network.addListener('networkStatusChange', status => {
+      if (status.connected) online();
+      else offline();
     });
     const b = App.addListener('appUrlOpen', (e) => receive(e.url));
-    window.addEventListener('online', wake);
+    window.addEventListener('online', online);
+    window.addEventListener('offline', offline);
     App.getLaunchUrl()
       .then((x) => {
         if (x?.url) receive(x.url);
@@ -223,7 +241,8 @@ function AppMain() {
       void a.then((x) => x.remove()).catch(() => {});
       void network.then((x) => x.remove()).catch(() => {});
       void b.then((x) => x.remove()).catch(() => {});
-      window.removeEventListener('online', wake);
+      window.removeEventListener('online', online);
+      window.removeEventListener('offline', offline);
       document.removeEventListener('visibilitychange', v);
     };
   }, [receive, refresh]);
@@ -335,6 +354,8 @@ function AppMain() {
       if (!attempt.current || attempt.current.key !== key) {
         attempt.current = { key, id: crypto.randomUUID() };
       }
+      const run = scheduleWrite ? measurement.current : null;
+      const started = performance.now();
       const writeSession = session.current;
       const generation = requestSerial.current;
       try {
@@ -344,6 +365,7 @@ function AppMain() {
         });
         attempt.current = null;
         if (generation !== requestSerial.current || writeSession !== session.current) return false;
+        if (run && measurement.current === run) run.finish('save', started, true);
         refreshGate.current.invalidate(generation);
         setSnap(old => old && applyConfirmedWrite(old, path, input, result));
         if (scheduleWrite) setSaveError(null);
@@ -351,6 +373,7 @@ function AppMain() {
         return true;
       } catch (e) {
         if (generation !== requestSerial.current || writeSession !== session.current) return false;
+        if (run && measurement.current === run) run.finish('save', started, false, false, e);
         if (scheduleWrite) {
           const rejected = e instanceof ApiError && e.status < 500 && e.status !== 408;
           const conflict = e instanceof ApiError && e.status === 409;
@@ -580,6 +603,7 @@ function AppMain() {
     );
   }
 
+  const showSyncWarning = syncError && (!snap || syncError.failures > 1);
   const unreadMessages = Boolean(
     snap?.messages.some((m) => !m.read_at) || snap?.reservationMessages.some((m) => !m.read_at),
   );
@@ -609,20 +633,23 @@ function AppMain() {
         </button>
       </header>
 
-      {(error || syncError) && (
+      {(error || showSyncWarning) && (
         <div role="alert" className="warning warningRow">
-          <span>{error || syncError}</span>
+          <span>{error || (snap ? `正在重连，显示上次同步的数据。${syncError?.detail}` : `首次同步未完成。${syncError?.detail}`)}</span>
           <button type="button" className="btnGhostSm" disabled={manualRefreshPending} onClick={() => void manualRefresh()}>
             {manualRefreshPending ? '刷新中…' : '刷新'}
           </button>
         </div>
       )}
 
+      {syncError && snap && !showSyncWarning && page !== 'home' && (
+        <p className="helperText" role="status">正在重连，当前显示上次同步的数据。</p>
+      )}
       {page === 'home' && inviteNotice && <p role="status" className="helperText">{inviteNotice}</p>}
 
       {!snap ? (
         <section className="paper emptyState">
-          <p className="emptyStateTitle">正在同步小队数据…</p>
+          <p className="emptyStateTitle">{syncError ? '等待重新同步小队数据' : '正在同步小队数据…'}</p>
           <button type="button" className="btnSecondary" disabled={manualRefreshPending} onClick={() => void manualRefresh()}>
             {manualRefreshPending ? '刷新中…' : '手动刷新'}
           </button>
@@ -632,6 +659,8 @@ function AppMain() {
           {page === 'home' && (
             <HomeView
               snap={snap}
+              active={active}
+              reconnecting={Boolean(syncError)}
               game={game}
               custom={custom}
               busy={busy}
@@ -650,51 +679,57 @@ function AppMain() {
           )}
 
           {page === 'schedule' && scheduleSnap && (
-            <>
-              <section className="paper">
-                <div className="cardHeaderRow">
-                  <h2 className="sectionHeading">三人共同空闲</h2>
-                  <span className="badgeSoft">北京时间</span>
-                </div>
-                {candidates.length ? (
-                  <div className="commonSlotList">
-                    {candidates.slice(0, 5).map((c, i) => {
-                      const n = scheduleSnap.nights.find((x) => x.id === c.nightId)!;
-                      return (
-                        <div key={i} className="commonSlotChip tabular">
-                          <strong>{formatNightWeekday(n.dateKey)}</strong>
-                          <span>
-                            {formatSlotInNight(c.firstStart, n.dateKey)} –{' '}
-                            {formatSlotInNight(c.availableUntil, n.dateKey)}
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <p className="helperText">还没有三人连续至少 1 小时的共同空闲。</p>
-                )}
-                <div className="memberConfirmRow" aria-label="成员日程状态">
-                  {snap.members.map((m) => {
-                    const available = m.schedule.some((p) => p.to > Math.ceil(snap.now / 1800000));
-                    const label = available ? '已填空闲' : m.scheduleStatus === 'unavailable' ? '已确认没空' : '未填写';
-                    return <span key={m.id} className={`confirmPill ${available ? 'isConfirmed' : ''}`}>{m.nickname} · {label}</span>;
+            <section className="paper">
+              <div className="cardHeaderRow">
+                <h2 className="sectionHeading">三人共同空闲</h2>
+                <span className="badgeSoft">北京时间</span>
+              </div>
+              {candidates.length ? (
+                <div className="commonSlotList">
+                  {candidates.slice(0, 5).map((c, i) => {
+                    const n = scheduleSnap.nights.find((x) => x.id === c.nightId)!;
+                    return (
+                      <div key={i} className="commonSlotChip tabular">
+                        <strong>{formatNightWeekday(n.dateKey)}</strong>
+                        <span>
+                          {formatSlotInNight(c.firstStart, n.dateKey)} –{' '}
+                          {formatSlotInNight(c.availableUntil, n.dateKey)}
+                        </span>
+                      </div>
+                    );
                   })}
                 </div>
-                <p className="helperText">每日周期为 06:00 至次日 06:00。</p>
-              </section>
-
-              <ScheduleEditor
-                snapshot={scheduleSnap}
-                explicitlyUnavailable={snap.members.find((m) => m.id === snap.me.id)?.scheduleStatus === 'unavailable'}
-                earliestStart={Math.ceil(snap.now / 1800000)}
-                isSaving={busy && busyKey === 'save-schedule'}
-                saveError={saveError}
-                onSave={saveSchedule}
-                onRefreshLatest={refresh}
-                onClearError={() => setSaveError(null)}
-              />
-
+              ) : (
+                <p className="helperText">还没有三人连续至少 1 小时的共同空闲。</p>
+              )}
+              <div className="memberConfirmRow" aria-label="成员日程状态">
+                {snap.members.map((m) => {
+                  const available = m.schedule.some((p) => p.to > Math.ceil(snap.now / 1800000));
+                  const label = available ? '已填空闲' : m.scheduleStatus === 'unavailable' ? '已确认没空' : '未填写';
+                  return <span key={m.id} className={`confirmPill ${available ? 'isConfirmed' : ''}`}>{m.nickname} · {label}</span>;
+                })}
+              </div>
+              <p className="helperText">每日周期为 06:00 至次日 06:00。</p>
+            </section>
+          )}
+          {scheduleSnap && (page === 'schedule' || scheduleDirty) && (
+            <ScheduleEditor
+              key={snap.me.id}
+              visible={page === 'schedule'}
+              isDirty={scheduleDirty}
+              setIsDirty={setScheduleDirty}
+              snapshot={scheduleSnap}
+              explicitlyUnavailable={snap.members.find((m) => m.id === snap.me.id)?.scheduleStatus === 'unavailable'}
+              earliestStart={Math.ceil(snap.now / 1800000)}
+              isSaving={busy && busyKey === 'save-schedule'}
+              saveError={saveError}
+              onSave={saveSchedule}
+              onRefreshLatest={refresh}
+              onClearError={() => setSaveError(null)}
+            />
+          )}
+          {page === 'schedule' && (
+            <>
               <WeeklyTemplate
                 key={snap.me.id}
                 member={snap.members.find((m) => m.id === snap.me.id)!}
@@ -706,6 +741,7 @@ function AppMain() {
               <ReservationPanel
                 draft={reservationDraft}
                 onDraftConsumed={() => setReservationDraft(null)}
+                clientClock={snap.clientClock}
                 now={snap.now}
                 me={snap.me.id}
                 members={snap.members}
@@ -807,6 +843,10 @@ function AppMain() {
                   setToken(next);
                   if (!next) {
                     setSnap(null);
+                    measurement.current = null;
+                    setDiagnostics(null);
+                    setScheduleDirty(false);
+                    setSaveError(null);
                     setNickname('');
                     lastServerNickname.current = '';
                     setFocusInvite(null);
@@ -814,7 +854,7 @@ function AppMain() {
                     setReservationNotice('');
                     setPage('home');
                     setError('');
-                    setSyncError('');
+                    setSyncError(null);
                   } else {
                     void refresh();
                   }
@@ -822,6 +862,12 @@ function AppMain() {
               />
 
               <PushSettings token={token} apiBase={apiBase} />
+              <NetworkDiagnostics report={diagnostics?.report ?? null} active={diagnostics?.active ?? false} onToggle={() => {
+                const previous = measurement.current;
+                const report = previous ?? new NetworkMeasurement();
+                measurement.current = previous ? null : report;
+                setDiagnostics({ report, active: !previous });
+              }} />
               <VersionSettings token={token} apiBase={apiBase} />
             </>
           )}

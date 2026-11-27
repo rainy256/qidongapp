@@ -21,6 +21,8 @@ import {
 
 type HomeViewProps = Readonly<{
   snap: Snapshot;
+  active: boolean;
+  reconnecting: boolean;
   game: GameTag;
   custom: string;
   busy: boolean;
@@ -34,6 +36,8 @@ type HomeViewProps = Readonly<{
 
 export function HomeView({
   snap,
+  active,
+  reconnecting,
   game,
   custom,
   busy,
@@ -44,19 +48,45 @@ export function HomeView({
   onRebook,
   write,
 }: HomeViewProps) {
-  const [tick, setTick] = useState(() => performance.now());
+  const [, setTick] = useState(0);
   const [availabilityOpen, setAvailabilityOpen] = useState(false);
   const [availabilityRetry, setAvailabilityRetry] = useState<string | null>(null);
   const [rebookOpen, setRebookOpen] = useState<string | null>(null);
   const [moreOptions, setMoreOptions] = useState(false);
   const [waitWarning, setWaitWarning] = useState<{id:string;reply:string} | null>(null);
+  const elapsed = snap.clientClock === undefined ? 0 : Math.max(0, performance.now() - snap.clientClock);
+  const now = snap.now + elapsed;
+  const minutesSinceSync = Math.floor(elapsed / 60000);
   useEffect(() => {
-    const timer = setInterval(() => setTick(performance.now()), 500);
-    const update = () => setTick(performance.now());
-    document.addEventListener('visibilitychange', update);
-    return () => { clearInterval(timer); document.removeEventListener('visibilitychange', update); };
-  }, []);
-  const now = snap.now + Math.max(0, tick - (snap.clientClock ?? tick));
+    if (!active || snap.clientClock === undefined) return;
+    const origin = snap.clientClock;
+    let timer: ReturnType<typeof setTimeout>;
+    function schedule() {
+      const elapsed = Math.max(0, performance.now() - origin);
+      const now = snap.now + elapsed;
+      // Sync age changes every minute. Booking slots, midnight and 23:00 fall on half-hour boundaries.
+      let delay = Math.min(60000 - elapsed % 60000, 1800000 - now % 1800000);
+      function at(time: number | null | undefined) {
+        if (time != null && time > now) delay = Math.min(delay, time - now);
+      }
+      for (const member of snap.members) {
+        if (member.last_seen) at(member.last_seen + 90000);
+        at(member.available_until);
+      }
+      for (const invite of snap.invites) {
+        at(invite.expires_at);
+        at(invite.r1_eta);
+        at(invite.r2_eta);
+        at(invite.r3_eta);
+      }
+      timer = setTimeout(() => {
+        setTick(tick => tick + 1);
+        schedule();
+      }, Math.max(1, Math.ceil(delay)));
+    }
+    schedule();
+    return () => clearTimeout(timer);
+  }, [active, snap]);
   const invites = snap.invites.map(i => i.expires_at <= now ? {...i, status:'expired' as const} : i);
   const activeInvites = invites.filter(i => i.status !== 'expired');
   const expiredInvites = invites.filter(i => i.status === 'expired');
@@ -194,7 +224,8 @@ export function HomeView({
                           r === 'ready' ? 'btnChipReady' : ''
                         }`}
                         onClick={() => {
-                          if (['5','10','30'].includes(r) && now+Number(r)*60000>=inv.expires_at) {
+                          const replyTime = snap.clientClock === undefined ? now : snap.now + performance.now() - snap.clientClock;
+                          if (['5','10','30'].includes(r) && replyTime+Number(r)*60000>=inv.expires_at) {
                             setWaitWarning({id:inv.id,reply:r});
                             return;
                           }
@@ -271,7 +302,9 @@ export function HomeView({
           </div>
           <div className="squadIntro">
             <h2 className="sectionHeading">开黑小队</h2>
-            <p className="sectionSub">随时叫上熟悉的伙伴，一键发车。</p>
+            <p className="sectionSub">
+              {reconnecting && '正在重连 · '}{minutesSinceSync ? `${minutesSinceSync} 分钟前同步` : '刚刚同步'}
+            </p>
           </div>
         </div>
         <div className="members">

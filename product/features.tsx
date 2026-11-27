@@ -303,6 +303,7 @@ type ReservationProps = {
   draft: ReservationDraft | null;
   onDraftConsumed: () => void;
   now: number;
+  clientClock?: number;
   me: string;
   members: { id: string; nickname: string }[];
   reservations: Reservation[];
@@ -317,7 +318,8 @@ type ReservationProps = {
 export function ReservationPanel({
   draft,
   onDraftConsumed,
-  now,
+  now: serverNow,
+  clientClock,
   me,
   members,
   reservations,
@@ -346,7 +348,18 @@ export function ReservationPanel({
     onDraftConsumed();
   }, [draft, onDraftConsumed]);
 
+  const [, setSlotTick] = useState(0);
+  const currentTime = () => serverNow + (clientClock === undefined ? 0 : Math.max(0, performance.now() - clientClock));
+  const now = currentTime();
   const start = Math.floor(now / 1800000) + 1;
+  useEffect(() => {
+    if (clientClock === undefined) return;
+    const tick = () => setSlotTick(value => value + 1);
+    const delay = start * 1800000 - (serverNow + Math.max(0, performance.now() - clientClock));
+    const timer = setTimeout(tick, Math.max(1, Math.ceil(delay)));
+    document.addEventListener('visibilitychange', tick);
+    return () => { clearTimeout(timer); document.removeEventListener('visibilitychange', tick); };
+  }, [start, serverNow, clientClock]);
   const firstDayStart = Math.floor((now + 7200000) / 86400000) * 48 - 4;
   const end = firstDayStart + 336;
 
@@ -364,7 +377,8 @@ export function ReservationPanel({
     }).filter((d) => d.slots.length > 0);
   }, [firstDayStart, start, end]);
 
-  const effectiveFrom = from !== null && from >= start && from < end ? from : (dayGroups[0]?.slots[0] ?? start);
+  const effectiveFrom = from ?? start;
+  const staleStart = from !== null && (from < start || from >= end);
 
   const selectedDay =
     dayGroups.find((d) => effectiveFrom >= d.dayFrom && effectiveFrom < d.dayTo) ?? dayGroups[0];
@@ -372,11 +386,18 @@ export function ReservationPanel({
   const customMissing = !edit && selectedGame === 'custom' && !title.trim();
   const exceedsRange = effectiveFrom + duration > end;
   const conflict = reservations.find(r => r.id !== edit?.id && r.state !== 'cancelled' && r.from_slot < effectiveFrom + duration && r.to_slot > effectiveFrom);
-  const valid = effectiveFrom >= start && !exceedsRange && !customMissing && !conflict;
+  const nextFreeStart = staleStart ? dayGroups.flatMap(day => day.slots).find(slot =>
+    slot + duration <= end && !reservations.some(r => r.id !== edit?.id && r.state !== 'cancelled'
+      && r.from_slot < slot + duration && r.to_slot > slot)) : undefined;
+  const valid = !staleStart && !exceedsRange && !customMissing && !conflict;
 
   async function submit(e: FormEvent) {
     e.preventDefault();
     if (!valid || busy) return;
+    if (effectiveFrom * 1800000 <= currentTime()) {
+      setSlotTick(value => value + 1);
+      return;
+    }
     const ok = edit
       ? await write(
           `/api/reservations/${edit.id}/change`,
@@ -496,6 +517,7 @@ export function ReservationPanel({
               value={effectiveFrom}
               onChange={(e) => setFrom(Number(e.target.value))}
             >
+              {staleStart && <option value={effectiveFrom} disabled>{formatSlotStamp(effectiveFrom)}（已失效）</option>}
               {(selectedDay?.slots ?? []).map((s) => (
                 <option key={s} value={s}>
                   {formatSlotInNight(s, selectedDay.dateKey)}
@@ -520,7 +542,14 @@ export function ReservationPanel({
           </label>
         </div>
 
-        {conflict && <div className="stackForm"><p role="alert" className="fieldError">这个时间已有预约</p><button type="button" className="btnGhostSm" onClick={() => { const el=document.getElementById('reservation-'+conflict.id); el?.focus({preventScroll:true}); el?.scrollIntoView({behavior:'smooth',block:'start'}); }}>查看该预约</button></div>}
+        {from === null && <p className="fieldHint">默认从下一个半小时开始，可自行选择时间。</p>}
+        {staleStart && <div role="status" className="stackForm">
+          <p className="fieldError">原选时间 {formatSlotStamp(effectiveFrom)} 已失效，请重新选择。</p>
+          {nextFreeStart !== undefined && <button type="button" className="btnGhostSm" onClick={() => setFrom(nextFreeStart)}>
+            改选 {formatSlotStamp(nextFreeStart)}
+          </button>}
+        </div>}
+        {!staleStart && conflict && <div className="stackForm"><p role="alert" className="fieldError">这个时间已有预约</p><button type="button" className="btnGhostSm" onClick={() => { const el=document.getElementById('reservation-'+conflict.id); el?.focus({preventScroll:true}); el?.scrollIntoView({behavior:'smooth',block:'start'}); }}>查看该预约</button></div>}
         {conflictNotice && !conflict && <p role="status" className="helperText">提交未成功，请检查顶部提示，或改选其他时段后重试。</p>}
         {exceedsRange && <p className="fieldError">结束时间超出了未来 7 天范围，请缩短时长或提前开始时间。</p>}
 

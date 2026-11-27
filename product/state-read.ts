@@ -6,7 +6,7 @@ const direct = 'https://qidongapp.apexdaishi.xyz';
 
 // Both production routes reach the same Worker and D1 database. Only a state
 // read may use the second route. Never replay a user action or a login.
-export async function readSquadState(base: string, token: string, signal: AbortSignal): Promise<Snapshot> {
+export async function readSquadState(base: string, token: string, signal: AbortSignal, onBackup?: () => void): Promise<Snapshot> {
   if (base !== primary) return apiRequest<Snapshot>(base, '/api/state', token, undefined, signal);
   if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
   const requests = new AbortController();
@@ -23,6 +23,7 @@ export async function readSquadState(base: string, token: string, signal: AbortS
       function startBackup() {
         if (backupStarted || requests.signal.aborted) return;
         backupStarted = true;
+        onBackup?.();
         void read(direct);
       }
       async function read(origin: string) {
