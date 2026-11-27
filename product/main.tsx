@@ -24,6 +24,7 @@ import { PushSettings, ReservationPanel, VersionSettings, WeeklyTemplate } from 
 import { createRefreshGate } from './refresh-gate.mjs';
 import { createRefreshLoop } from './refresh-loop.mjs';
 import { applyConfirmedWrite, type WriteResult } from './confirmed-write';
+import { readSquadState } from './state-read';
 import { parseNativeLaunch } from './native-link.mjs';
 import {
   ApiError,
@@ -120,7 +121,7 @@ function AppMain() {
     return refreshGate.current.run(id, async signal => {
     if (signal.aborted || id !== requestSerial.current || session.current !== t) return false;
     try {
-      const data = await apiRequest<Snapshot>(apiBase, '/api/state', t, undefined, signal);
+      const data = await readSquadState(apiBase, t, signal);
       if (signal.aborted || id !== requestSerial.current || session.current !== t) return false;
       setSnap(old => {
         const members = data.members.map(m => {

@@ -2,11 +2,74 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { apiRequest } from '../types';
 import { apiEndpoint, bearerAuth, fetchWithTimeout } from '../http';
 import { applyConfirmedWrite } from '../confirmed-write';
+import { readSquadState } from '../state-read';
 import type { Snapshot, Invite } from '../types';
 
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.useRealTimers();
+});
+
+describe('production squad read routes', () => {
+  const primary = 'https://qidong.apexdaishi.xyz/app-api';
+  const direct = 'https://qidongapp.apexdaishi.xyz/api/state';
+  const read = (base = primary) => readSquadState(base, 'fixture', new AbortController().signal);
+
+  it('uses only the primary route for healthy reads and respects a definitive rejection', async () => {
+    const fetcher = vi.fn().mockResolvedValueOnce(Response.json({now:1}))
+      .mockResolvedValueOnce(Response.json({error:'unauthorized'}, {status:401}));
+    vi.stubGlobal('fetch', fetcher);
+    await expect(read()).resolves.toEqual({now:1});
+    await expect(read()).rejects.toMatchObject({status:401});
+    expect(fetcher.mock.calls.map(call => call[0])).toEqual([primary+'/state', primary+'/state']);
+  });
+
+  it('uses the existing direct route after a slow read and cancels the losing request', async () => {
+    vi.useFakeTimers();
+    let primarySignal: AbortSignal | undefined;
+    const fetcher = vi.fn((url: string, init: RequestInit) => {
+      if (url === direct) return Promise.resolve(Response.json({now:2}));
+      primarySignal = init.signal!;
+      return new Promise<Response>((_resolve,reject) => primarySignal!.addEventListener('abort', () => reject(new DOMException('Aborted','AbortError'))));
+    });
+    vi.stubGlobal('fetch', fetcher);
+    const result = read();
+    await vi.advanceTimersByTimeAsync(4499);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(result).resolves.toEqual({now:2});
+    expect(fetcher).toHaveBeenNthCalledWith(2,direct,expect.objectContaining({method:'GET',credentials:'omit',headers:{Authorization:'Bearer fixture'}}));
+    expect(primarySignal?.aborted).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('recovers immediately from a transient failure and never reroutes a custom server', async () => {
+    const fetcher = vi.fn().mockRejectedValueOnce(new TypeError('network')).mockResolvedValueOnce(Response.json({now:3}))
+      .mockRejectedValueOnce(new TypeError('custom network'));
+    vi.stubGlobal('fetch', fetcher);
+    await expect(read()).resolves.toEqual({now:3});
+    await expect(read('https://custom.test')).rejects.toThrow('custom network');
+    expect(fetcher.mock.calls.map(call=>call[0])).toEqual([primary+'/state',direct,'https://custom.test/api/state']);
+  });
+
+  it('keeps one deadline for both routes and cancels promptly on invalidation', async () => {
+    vi.useFakeTimers();
+    const signals: AbortSignal[] = [];
+    vi.stubGlobal('fetch', (_url: string, init: RequestInit) => new Promise((_resolve,reject) => {
+      signals.push(init.signal!);
+      init.signal!.addEventListener('abort', () => reject(new DOMException('Aborted','AbortError')));
+    }));
+    const timeout = expect(read()).rejects.toMatchObject({name:'AbortError'});
+    await vi.advanceTimersByTimeAsync(20000);
+    await timeout;
+    const ctl = new AbortController();
+    const cancelled = expect(readSquadState(primary,'fixture',ctl.signal)).rejects.toMatchObject({name:'AbortError'});
+    ctl.abort();
+    await cancelled;
+    expect(signals).toHaveLength(3);
+    expect(signals.every(signal=>signal.aborted)).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+  });
 });
 
 describe('APK HTTP transport', () => {

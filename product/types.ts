@@ -1,5 +1,5 @@
 import type { GameTag, Span } from '../src/original/domain/types';
-import { apiEndpoint, fetchWithTimeout, bearerAuth } from './http';
+import { apiEndpoint, fetchWithTimeout, bearerAuth, STATE_TIMEOUT_MS } from './http';
 
 export type WeekSpan = { day: number; from: number; to: number };
 
@@ -182,7 +182,7 @@ export async function apiRequest<T>(
       throw new ApiError(res.status, data?.error || 'request_failed');
     }
     return await res.json() as T;
-  }, path === '/api/state' && !input ? 20000 : undefined);
+  }, path === '/api/state' && !input ? STATE_TIMEOUT_MS : undefined);
 }
 
 export function formatErrorMessage(e: unknown): string {

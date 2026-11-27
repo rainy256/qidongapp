@@ -1,3 +1,5 @@
+export const STATE_TIMEOUT_MS = 20000;
+
 export function bearerAuth(token: string | null): Record<string, string> {
   return token ? { Authorization: 'Bearer ' + token } : {};
 }
