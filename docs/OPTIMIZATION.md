@@ -123,3 +123,5 @@
 - 2026-11-27：巡检 main 6afb7c6，最新正式版仍为 v0.1.7；核对修复 diff、回归测试及成功的基础检查 Actions，更新 OPT-001 为 main 已完成、待正式版。未重新运行测试或执行生产变更。
 
 - 2026-11-27：按维护者要求处理 OPT-002 至 OPT-009，处置及依据见索引和各条目开头。产品测试包括 [React 交互回归](../product/tests/interface.test.tsx)。正式版基线为 v0.1.7，真机记录留待实际候选包填写。
+
+- 验证：[实施提交 cb04378](https://github.com/rainy256/qidongapp/commit/cb04378ed31aefd8131cfd72c8a7e0b668779bec) 的本地 100 项自动化测试通过。Chromium 配合模拟接口验证了草稿切页、单次及连续读取失败、重连补刷、401 后切换成员的草稿隔离。[产品 Android 构建](https://github.com/rainy256/qidongapp/actions/runs/45971162314)和[探针 Android 构建](https://github.com/rainy256/qidongapp/actions/runs/45971162303)均通过，已生成调试包。本次未执行真机覆盖安装、真实推送及实际网络耗时测量。
