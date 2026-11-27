@@ -132,22 +132,20 @@ export function tonightDeadline(now: number): number {
   return Math.floor((now + 28800000) / 86400000) * 86400000 - 28800000 + 23 * 3600000;
 }
 
+const clockFormat = new Intl.DateTimeFormat('zh-CN', {timeZone:'Asia/Shanghai',hour12:false,hour:'2-digit',minute:'2-digit'});
+const stampFormat = new Intl.DateTimeFormat('zh-CN', {
+  timeZone: 'Asia/Shanghai', hour12: false, month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit',
+});
+
 export function relativeTime(ms: number, now: number): string {
   const day = (v: number) => Math.floor((v + 28800000) / 86400000);
-  const time = new Date(ms).toLocaleTimeString('zh-CN', {timeZone:'Asia/Shanghai',hour12:false,hour:'2-digit',minute:'2-digit'});
+  const time = clockFormat.format(ms);
   const delta = day(ms) - day(now);
   return delta === 0 ? time : delta === 1 ? '明天 ' + time : delta === -1 ? '昨天 ' + time : formatTimestamp(ms);
 }
 
 export function formatTimestamp(ms: number): string {
-  return new Date(ms).toLocaleString('zh-CN', {
-    timeZone: 'Asia/Shanghai',
-    hour12: false,
-    month: 'numeric',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+  return stampFormat.format(ms);
 }
 
 export function formatSlotStamp(slot: number): string {
@@ -168,9 +166,11 @@ export async function apiRequest<T>(
   path: string,
   token: string | null,
   input?: object,
+  signal?: AbortSignal,
 ): Promise<T> {
   return fetchWithTimeout(apiEndpoint(apiBase, path), {
     method: input ? 'POST' : 'GET',
+    signal,
     headers: {
       ...bearerAuth(token),
       ...(input ? { 'Content-Type': 'application/json' } : {}),
@@ -182,7 +182,7 @@ export async function apiRequest<T>(
       throw new ApiError(res.status, data?.error || 'request_failed');
     }
     return await res.json() as T;
-  });
+  }, path === '/api/state' && !input ? 20000 : undefined);
 }
 
 export function formatErrorMessage(e: unknown): string {

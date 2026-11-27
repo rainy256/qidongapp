@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { ChevronDown, LogOut, RefreshCw, ShieldCheck, Smartphone } from 'lucide-react';
 import { ConfirmDialog } from './components/ConfirmDialog';
-import { apiEndpoint, fetchWithTimeout, bearerAuth } from './http';
+import { apiRequest } from './types';
 
 type Device = {
   id: string;
@@ -35,27 +35,13 @@ export function AccountPanel({
   const [confirmPasswordChange, setConfirmPasswordChange] = useState(false);
   const [revokeTarget, setRevokeTarget] = useState<Device | null>(null);
 
-  async function call(path: string, body?: object) {
-    const r = await fetchWithTimeout(apiEndpoint(apiBase, path), {
-      method: body ? 'POST' : 'GET',
-      headers: {
-        ...bearerAuth(token),
-        ...(body ? { 'Content-Type': 'application/json' } : {}),
-      },
-      ...(body ? { body: JSON.stringify(body) } : {}),
-    });
-    const data = await r.json();
-    if (!r.ok) throw Error(data.error || 'request_failed');
-    return data;
-  }
-
   async function load() {
-    setState(await call('/api/account'));
+    setState(await apiRequest<Account>(apiBase, '/api/account', token));
   }
 
   useEffect(() => {
     let alive = true;
-    call('/api/account')
+    apiRequest<Account>(apiBase, '/api/account', token)
       .then((x) => {
         if (alive) setState(x);
       })
@@ -90,7 +76,7 @@ export function AccountPanel({
     setBusy(true);
     setNotice('');
     try {
-      const r = await call('/api/account/password', { password, currentPassword: current });
+      const r = await apiRequest<{token?: string}>(apiBase, '/api/account/password', token, { password, currentPassword: current });
       const next = r.token;
       if (!next) throw Error('missing_session');
       await onSession(next);
@@ -128,11 +114,11 @@ export function AccountPanel({
     setBusy(true);
     setNotice('');
     try {
-      await call('/api/account/revoke', { id: target.id });
+      await apiRequest(apiBase, '/api/account/revoke', token, { id: target.id });
       if (target.id === state.currentSession) {
         await onSession(null);
       } else {
-        await load();
+        setState(old => old && {...old, sessions: old.sessions.filter(device => device.id !== target.id)});
         setNoticeTone('info');
         setNotice('旧设备已注销。');
       }

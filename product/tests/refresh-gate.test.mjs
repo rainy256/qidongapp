@@ -35,3 +35,18 @@ test('login generations do not share reads; failed reads can be retried', async 
   await assert.rejects(a,/network/);
   assert.equal(await gate.run(1,async()=>true),true);
 });
+
+test('an acknowledged write can replace a stalled read without waiting for its timeout', async () => {
+  const gate = createRefreshGate(), stale = deferred(), fresh = deferred();
+  let oldSignal;
+  const before = gate.run(1, signal => { oldSignal = signal; return stale.promise; });
+  await Promise.resolve();
+  gate.invalidate(1);
+  const after = gate.run(1, () => fresh.promise);
+  assert.equal(oldSignal.aborted, true);
+  stale.resolve('old');
+  await before;
+  assert.equal(gate.run(1, () => assert.fail('duplicate state read')), after);
+  fresh.resolve('new');
+  assert.equal(await after, 'new');
+});

@@ -6,14 +6,20 @@ export function createRefreshGate() {
     const current = flights.get(key);
     if (current) {
       return afterCurrent
-        ? current.then(() => run(key, task), () => run(key, task))
-        : current;
+        ? current.promise.then(() => run(key, task), () => run(key, task))
+        : current.promise;
     }
-    const next = Promise.resolve().then(task).finally(() => {
-      if (flights.get(key) === next) flights.delete(key);
+    const controller = new AbortController();
+    const promise = Promise.resolve().then(() => task(controller.signal)).finally(() => {
+      if (flights.get(key)?.controller === controller) flights.delete(key);
     });
-    flights.set(key, next);
-    return next;
+    flights.set(key, {controller, promise});
+    return promise;
   }
-  return { run };
+  function invalidate(key) {
+    const current = flights.get(key);
+    flights.delete(key);
+    current?.controller.abort();
+  }
+  return { run, invalidate };
 }

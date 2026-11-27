@@ -291,6 +291,11 @@
   color: var(--ink-secondary);
 }
 
+@media (prefers-reduced-motion: no-preference) {
+  .refreshPending { animation: refreshSpin 1s linear infinite; }
+  @keyframes refreshSpin { to { transform: rotate(360deg); } }
+}
+
 .btnIconDanger {
   width: 38px;
   height: 38px;

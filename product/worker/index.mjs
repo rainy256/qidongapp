@@ -35,17 +35,27 @@ export default {async fetch(req,env,ctx){
   if(path==='/api/account'||path.startsWith('/api/account/'))return await account(req,env,auth,req.method==='POST'?await body(req):null,now,json);
   if(path==='/api/version'&&req.method==='GET'){try{return json(await latestVersion());}catch{return json({error:'version_unavailable'},503);}}
   if(path==='/api/push'&&req.method==='GET'){
-   const r=await env.DB.prepare('SELECT bound_at FROM app_push_bindings WHERE member_id=?').bind(me.id).first();
-   const pref=await env.DB.prepare('SELECT quiet_start,quiet_end FROM app_push_preferences WHERE member_id=?').bind(me.id).first();const job=await env.DB.prepare("SELECT id,status,created_at,provider_http,provider_code FROM app_push_jobs WHERE member_id=? AND kind='test' ORDER BY created_at DESC LIMIT 1").bind(me.id).first();return json({bound:!!r,boundAt:r?.bound_at??null,quietStart:pref?.quiet_start??null,quietEnd:pref?.quiet_end??null,test:job??null,keyConfigured:!!env.SPT_ENCRYPTION_KEY});
+   const [binding,preferences,jobs]=await env.DB.batch([
+    env.DB.prepare('SELECT bound_at FROM app_push_bindings WHERE member_id=?').bind(me.id),
+    env.DB.prepare('SELECT quiet_start,quiet_end FROM app_push_preferences WHERE member_id=?').bind(me.id),
+    env.DB.prepare("SELECT id,status,created_at,provider_http,provider_code FROM app_push_jobs WHERE member_id=? AND kind='test' ORDER BY created_at DESC LIMIT 1").bind(me.id),
+   ]);
+   const r=binding.results[0],pref=preferences.results[0];
+   return json({bound:!!r,boundAt:r?.bound_at??null,quietStart:pref?.quiet_start??null,quietEnd:pref?.quiet_end??null,test:jobs.results[0]??null,keyConfigured:!!env.SPT_ENCRYPTION_KEY});
   }
   if(path==='/api/state'&&req.method==='GET'){
-   const r=await env.DB.batch([
+   const [,members,invites,messages,reservations,events,nudges]=await env.DB.batch([
     env.DB.prepare('UPDATE app_members SET last_seen=? WHERE id=? AND (last_seen IS NULL OR last_seen<?)').bind(now,me.id,now-30000),
     env.DB.prepare('SELECT m.id,m.nickname,m.schedule_json,m.schedule_revision,m.last_seen,m.available_until,m.availability_revision,w.template_json,w.override_days_json FROM app_members m LEFT JOIN app_weekly w ON w.member_id=m.id ORDER BY m.id'),
     env.DB.prepare('SELECT '+publicInvite+' FROM app_invites WHERE expires_at>? ORDER BY created_at DESC LIMIT 20').bind(now-86400000),
-    env.DB.prepare('SELECT id,invite_id,kind,actor,detail,created_at,read_at FROM app_messages WHERE member_id=? ORDER BY created_at DESC LIMIT 100').bind(me.id)
+    env.DB.prepare('SELECT id,invite_id,kind,actor,detail,created_at,read_at FROM app_messages WHERE member_id=? ORDER BY created_at DESC LIMIT 100').bind(me.id),
+    env.DB.prepare('SELECT id,creator,game,title,from_slot,to_slot,state,r1,r2,r3,revision FROM app_reservations WHERE to_slot>? ORDER BY from_slot LIMIT 50').bind(Math.floor((now-86400000)/1800000)),
+    env.DB.prepare('SELECT id,reservation_id,kind,detail,created_at,read_at FROM app_reservation_events WHERE member_id=? ORDER BY created_at DESC LIMIT 100').bind(me.id),
+    env.DB.prepare("SELECT id,invite_id,kind,content AS detail,created_at,status FROM app_push_jobs WHERE member_id=? AND kind='nudge' ORDER BY created_at DESC LIMIT 50").bind(me.id),
    ]);
-   const extra=await env.DB.batch([env.DB.prepare('SELECT id,creator,game,title,from_slot,to_slot,state,r1,r2,r3,revision FROM app_reservations WHERE to_slot*1800000>? ORDER BY from_slot LIMIT 50').bind(now-86400000),env.DB.prepare('SELECT id,reservation_id,kind,detail,created_at,read_at FROM app_reservation_events WHERE member_id=? ORDER BY created_at DESC LIMIT 100').bind(me.id),env.DB.prepare("SELECT id,invite_id,kind,content AS detail,created_at,status FROM app_push_jobs WHERE member_id=? AND kind='nudge' ORDER BY created_at DESC LIMIT 50").bind(me.id)]);return json({features:{rebook:env.ENABLE_REBOOKING==='true'},reservations:extra[0].results,reservationMessages:extra[1].results,nudges:extra[2].results,me,members:r[1].results.map(x=>({id:x.id,nickname:x.nickname,last_seen:x.last_seen,available_until:x.available_until>now?x.available_until:null,availability_revision:x.availability_revision,...scheduleView(x,now,x.id===me.id)})),invites:r[2].results.map(x=>inviteView(x,now)),messages:r[3].results,now});
+   return json({features:{rebook:env.ENABLE_REBOOKING==='true'},reservations:reservations.results,reservationMessages:events.results,nudges:nudges.results,me,
+    members:members.results.map(x=>({id:x.id,nickname:x.nickname,last_seen:x.last_seen,available_until:x.available_until>now?x.available_until:null,availability_revision:x.availability_revision,...scheduleView(x,now,x.id===me.id)})),
+    invites:invites.results.map(x=>inviteView(x,now)),messages:messages.results,now});
   }
   if(req.method!=='POST')return json({error:'not_found'},404);
   const b=await body(req);if(!b||typeof b!=='object')return json({error:'invalid_body'},400);

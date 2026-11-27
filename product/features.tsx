@@ -3,8 +3,8 @@ import { Bell, CalendarCheck2, Check, ChevronDown, Download, Plus, RefreshCw, Tr
 import { formatNightShort, formatSlotInNight, slotToShanghaiParts } from '../src/original/domain/time';
 import type { Candidate, GameTag } from '../src/original/domain/types';
 import { ConfirmDialog } from './components/ConfirmDialog';
-import { apiEndpoint, fetchWithTimeout, bearerAuth } from './http';
 import {
+  apiRequest,
   GAME_LABELS,
   formatSlotStamp,
   type Reservation,
@@ -51,29 +51,9 @@ export function PushSettings({ token, apiBase }: { token: string; apiBase: strin
   const [busy, setBusy] = useState(false);
   const [unbindDialogOpen, setUnbindDialogOpen] = useState(false);
 
-  async function request(path: string, body?: object) {
-    const res = await fetchWithTimeout(apiEndpoint(apiBase, path), {
-      method: body ? 'POST' : 'GET',
-      headers: {
-        ...bearerAuth(token),
-        ...(body ? { 'Content-Type': 'application/json' } : {}),
-      },
-      ...(body ? { body: JSON.stringify(body) } : {}),
-    });
-    const data = await res.json();
-    if (!res.ok) throw Error(data.error || 'request_failed');
-    return data;
-  }
-
-  async function load() {
-    const s = (await request('/api/push')) as PushState;
-    setState(s);
-    return s;
-  }
-
   useEffect(() => {
     let alive = true;
-    request('/api/push')
+    apiRequest<PushState>(apiBase, '/api/push', token)
       .then((s: PushState) => {
         if (alive) {
           setState(s);
@@ -93,22 +73,36 @@ export function PushSettings({ token, apiBase }: { token: string; apiBase: strin
   }, [token, apiBase]);
 
   useEffect(() => {
-    if (!state?.test || !['queued', 'sending'].includes(state.test.status)) return;
-    const t = setInterval(() => {
-      if (!document.hidden) void load().catch(() => {});
-    }, 3000);
-    return () => clearInterval(t);
-  }, [state?.test?.status, token, apiBase]);
+    if (busy || !state?.test || !['queued', 'sending'].includes(state.test.status)) return;
+    const ctl = new AbortController();
+    let timer = setTimeout(poll, 3000);
+    async function poll() {
+      try {
+        if (!document.hidden) {
+          const latest = await apiRequest<PushState>(apiBase, '/api/push', token, undefined, ctl.signal);
+          if (!ctl.signal.aborted) setState(latest);
+        }
+      } catch { /* Retry a pending delivery on the next poll. */ }
+      if (!ctl.signal.aborted) timer = setTimeout(poll, 3000);
+    }
+    return () => { ctl.abort(); clearTimeout(timer); };
+  }, [state?.test?.id, state?.test?.status, token, apiBase, busy]);
 
   async function action(path: string, body: object, success: string) {
     if (busy) return;
     setBusy(true);
     setNotice('');
     try {
-      await request(path, body);
+      const result = await apiRequest<{bound?: boolean; id?: string}>(apiBase, path, token, body);
+      setState(old => {
+        if (!old) return old;
+        if (typeof result.bound === 'boolean') return {...old, bound: result.bound};
+        if (result.id && path === '/api/push/test') return {...old, test: {id: result.id, status: 'queued'}};
+        if (old.test && path === '/api/push/confirm') return {...old, test: {...old.test, status: 'confirmed'}};
+        return old;
+      });
       setNoticeTone('info');
       setNotice(success);
-      await load();
       if (path.endsWith('/bind')) setSpt('');
     } catch (e) {
       setNoticeTone('error');
@@ -884,11 +878,9 @@ export function VersionSettings({ token, apiBase }: { token: string; apiBase: st
     setUrl('');
     setNotice('');
     try {
-      const r = await fetchWithTimeout(apiEndpoint(apiBase, '/api/version'), {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!r.ok) throw Error();
-      const d = await r.json();
+      const d = await apiRequest<{available: boolean; versionCode: number; version: string; url?: string}>(
+        apiBase, '/api/version', token,
+      );
       const parts = current.split('.').map(Number);
       const code = parts[0] * 1000000 + parts[1] * 1000 + parts[2];
       if (!d.available) {

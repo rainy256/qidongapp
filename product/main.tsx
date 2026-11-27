@@ -23,6 +23,7 @@ import { ScheduleEditor } from './components/ScheduleEditor';
 import { PushSettings, ReservationPanel, VersionSettings, WeeklyTemplate } from './features';
 import { createRefreshGate } from './refresh-gate.mjs';
 import { createRefreshLoop } from './refresh-loop.mjs';
+import { applyConfirmedWrite, type WriteResult } from './confirmed-write';
 import { parseNativeLaunch } from './native-link.mjs';
 import {
   ApiError,
@@ -31,7 +32,6 @@ import {
   type Page,
   type Snapshot,
   scheduleFields,
-  type SavedSchedule,
   type ReservationDraft,
   type WriteFn,
 } from './types';
@@ -59,6 +59,8 @@ function AppMain() {
   const [activation, setActivation] = useState('');
   const [activationMember, setActivationMember] = useState('m1');
   const [error, setError] = useState('');
+  const [syncError, setSyncError] = useState('');
+  const [manualRefreshPending, setManualRefreshPending] = useState(false);
   const [snap, setSnap] = useState<Snapshot | null>(null);
   const [page, setPage] = useState<Page>('home');
   const [active, setActive] = useState(true);
@@ -115,11 +117,11 @@ function AppMain() {
     const t = session.current;
     if (!t) return false;
     const id = requestSerial.current;
-    return refreshGate.current.run(id, async () => {
-    if (id !== requestSerial.current || session.current !== t) return false;
+    return refreshGate.current.run(id, async signal => {
+    if (signal.aborted || id !== requestSerial.current || session.current !== t) return false;
     try {
-      const data = await apiRequest<Snapshot>(apiBase, '/api/state', t);
-      if (id !== requestSerial.current || session.current !== t) return false;
+      const data = await apiRequest<Snapshot>(apiBase, '/api/state', t, undefined, signal);
+      if (signal.aborted || id !== requestSerial.current || session.current !== t) return false;
       setSnap(old => {
         const members = data.members.map(m => {
           const previous = old?.me.id === data.me.id && old.members.find(x => x.id === m.id);
@@ -132,10 +134,10 @@ function AppMain() {
         });
         return {...data, members, clientClock: performance.now()};
       });
-      setError('');
+      setSyncError('');
       return true;
     } catch (e) {
-      if (id !== requestSerial.current || session.current !== t) return false;
+      if (signal.aborted || id !== requestSerial.current || session.current !== t) return false;
       if (e instanceof ApiError && e.status === 401) {
         requestSerial.current++;
         session.current = null;
@@ -146,14 +148,21 @@ function AppMain() {
         if (Capacitor.isNativePlatform()) {
           void SecureSession.clear().catch(() => {});
         }
+        setSyncError('');
         setError('登录状态已失效，请使用个人口令重新登录。');
         return false;
       }
-      setError('小队数据暂未刷新，稍后会自动重试。' + formatErrorMessage(e));
+      setSyncError('小队数据暂未刷新，稍后会自动重试。' + formatErrorMessage(e));
       return false;
     }
     }, afterCurrent);
   }, []);
+
+  async function manualRefresh() {
+    setManualRefreshPending(true);
+    setError('');
+    try { await refresh(); } finally { setManualRefreshPending(false); }
+  }
 
   const receive = useCallback(
     (raw: string) => {
@@ -256,12 +265,12 @@ function AppMain() {
       if (disclosure) disclosure.open = true;
       el.scrollIntoView({ behavior: 'smooth', block: 'center' });
     } else {
-      if (error) return; // retry on the next successful snapshot instead of discarding the deep link
+      if (syncError) return; // retry on the next successful snapshot instead of discarding the deep link
       setInviteNotice('这张车票已过期或不在当前列表中。');
       window.scrollTo({ top: 0, behavior: 'auto' });
     }
     setFocusInvite(null);
-  }, [focusInvite, page, snap, inviteLoading, error]);
+  }, [focusInvite, page, snap, inviteLoading, syncError]);
 
   useEffect(() => {
     if (!snap || !focusReservation || page !== 'schedule') return;
@@ -328,27 +337,16 @@ function AppMain() {
       const writeSession = session.current;
       const generation = requestSerial.current;
       try {
-        const result = await apiRequest<Partial<SavedSchedule> & {available_until?: number | null; availability_revision?: number; now?: number}>(apiBase, path, writeSession, {
+        const result = await apiRequest<WriteResult>(apiBase, path, writeSession, {
           ...input,
           ...(versioned ? { mutation: attempt.current.id } : {}),
         });
         attempt.current = null;
         if (generation !== requestSerial.current || writeSession !== session.current) return false;
-        if (scheduleWrite && Array.isArray(result.schedule) && typeof result.schedule_revision === 'number') {
-          const saved = scheduleFields({...result, schedule: result.schedule, schedule_revision: result.schedule_revision});
-          setSnap(old => old ? {...old, members: old.members.map(m =>
-            m.id === old.me.id && m.schedule_revision <= saved.schedule_revision ? {...m, ...saved} : m
-          )} : old);
-          setSaveError(null);
-          setError('');
-          return true;
-        }
-        // Only update availability from an acknowledged server response. This also
-        // survives a failed subsequent state refresh.
-        if (path === '/api/availability' && typeof result.availability_revision === 'number' && typeof result.now === 'number') {
-          setSnap(old => old ? {...old, members: old.members.map(m => m.id === old.me.id && (m.availability_revision ?? 0) <= result.availability_revision! ? {...m, available_until: result.available_until ?? null, availability_revision: result.availability_revision} : m)} : old);
-        }
-        await refresh(true);
+        refreshGate.current.invalidate(generation);
+        setSnap(old => old && applyConfirmedWrite(old, path, input, result));
+        if (scheduleWrite) setSaveError(null);
+        void refresh();
         return true;
       } catch (e) {
         if (generation !== requestSerial.current || writeSession !== session.current) return false;
@@ -368,8 +366,8 @@ function AppMain() {
         if (e instanceof ApiError && e.status < 500) {
           attempt.current = null;
           if (e.status === 409) {
-            await refresh(true);
-            setError(formatErrorMessage(e));
+            refreshGate.current.invalidate(generation);
+            void refresh();
           }
         }
         return false;
@@ -602,18 +600,19 @@ function AppMain() {
         <button
           type="button"
           className="btnIconGhost"
-          aria-label="刷新数据"
-          onClick={() => void refresh()}
+          aria-label={manualRefreshPending ? '刷新中' : '刷新数据'}
+          disabled={manualRefreshPending}
+          onClick={() => void manualRefresh()}
         >
-          <RefreshCw size={16} aria-hidden="true" />
+          <RefreshCw size={16} className={manualRefreshPending ? 'refreshPending' : undefined} aria-hidden="true" />
         </button>
       </header>
 
-      {error && (
+      {(error || syncError) && (
         <div role="alert" className="warning warningRow">
-          <span>{error}</span>
-          <button type="button" className="btnGhostSm" onClick={() => void refresh()}>
-            重试
+          <span>{error || syncError}</span>
+          <button type="button" className="btnGhostSm" disabled={manualRefreshPending} onClick={() => void manualRefresh()}>
+            {manualRefreshPending ? '刷新中…' : '刷新'}
           </button>
         </div>
       )}
@@ -623,8 +622,8 @@ function AppMain() {
       {!snap ? (
         <section className="paper emptyState">
           <p className="emptyStateTitle">正在同步小队数据…</p>
-          <button type="button" className="btnSecondary" onClick={() => void refresh()}>
-            手动刷新
+          <button type="button" className="btnSecondary" disabled={manualRefreshPending} onClick={() => void manualRefresh()}>
+            {manualRefreshPending ? '刷新中…' : '手动刷新'}
           </button>
         </section>
       ) : (
@@ -814,6 +813,7 @@ function AppMain() {
                     setReservationNotice('');
                     setPage('home');
                     setError('');
+                    setSyncError('');
                   } else {
                     void refresh();
                   }
